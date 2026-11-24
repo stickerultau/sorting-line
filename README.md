@@ -2,6 +2,10 @@
 
 A small sorting line: mixed marbles and buttons ride a belt, flippers knock each one into the jar of its colour, full jars get a lid and move to the shelf. This is the one-week clip prototype from the development plan (`../SORTING_LINE_DEVELOPMENT_PLAN.md`). Its job is to be filmed and to be put in front of strangers.
 
+**Play it:** https://stickerultau.github.io/sorting-line/
+
+Every push to `main` runs the tests and publishes the game to that address through GitHub Pages.
+
 ## Run it
 
 ```
