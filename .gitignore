@@ -1,0 +1,7 @@
+node_modules/
+dist/
+.superpowers/
+spike/out/
+spike/node_modules/
+spike/state.json
+*.log
