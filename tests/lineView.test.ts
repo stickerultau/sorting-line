@@ -34,12 +34,20 @@ function bareSet(config: SimConfig): LineSet {
   }
 }
 
-function makeView(state: SimState): { view: LineView; scene: THREE.Scene; pops: string[] } {
+function makeView(state: SimState, camera = new THREE.PerspectiveCamera()) {
   const scene = new THREE.Scene()
   const pops: string[] = []
   const fx: LineFx = { pop: (_at, text) => pops.push(text) }
-  const view = new LineView(scene, new THREE.PerspectiveCamera(), buildModels(), bareSet(state.config), state.config, silentAudio, fx)
-  return { view, scene, pops }
+  const models = buildModels()
+  const view = new LineView(scene, camera, models, bareSet(state.config), state.config, silentAudio, fx)
+  /** How many different places hold a jar. The three stations count too. */
+  const jarPlaces = () =>
+    new Set(
+      scene.children
+        .filter((child) => child instanceof THREE.Mesh && child.geometry === models.jarGeometry)
+        .map((jar) => jar.position.toArray().map((n) => n.toFixed(2)).join()),
+    ).size
+  return { view, scene, pops, jarPlaces }
 }
 
 const rareMeshes = (scene: THREE.Scene) => scene.children.filter((child) => child.userData.rare)
@@ -121,9 +129,42 @@ describe('LineView', () => {
 
   it('fills every shelf place when the line resumes with many jars', () => {
     const state = createSim({ ...QUIET, startShelved: 500 }, 1)
-    const { view, scene } = makeView(state)
+    const { view, scene, jarPlaces } = makeView(state)
     view.update(state, 0)
     expect(liveItems(scene)).toHaveLength(30 * 12)
+    expect(jarPlaces()).toBe(30 + 3)
+  })
+
+  it('fills the empty shelf places when many jars were filled out of sight', () => {
+    const state = createSim({ ...QUIET, startShelved: 4 }, 1)
+    const { view, scene, jarPlaces } = makeView(state)
+    expect(jarPlaces()).toBe(4 + 3)
+    view.restock(500)
+    expect(jarPlaces()).toBe(30 + 3)
+    expect(liveItems(scene)).toHaveLength(30 * 12)
+  })
+
+  it('a click between a plain item and a rare marble catches the marble', () => {
+    const state = createSim(QUIET, 1)
+    state.items.push({ id: 1, family: 'button', colour: 'red', x: 5 }, { id: 2, family: 'marble', colour: 'red', x: 5.6, rare: 'opal' })
+    const camera = new THREE.PerspectiveCamera(50, 800 / 600, 0.1, 100)
+    camera.position.set(5.3, 2, 12)
+    camera.lookAt(5.3, 0, 0)
+    camera.updateMatrixWorld()
+    const { view, scene } = makeView(state, camera)
+    view.update(state, 0)
+    const canvas = { getBoundingClientRect: () => ({ left: 0, top: 0, width: 800, height: 600 }) } as HTMLCanvasElement
+    const onScreen = (at: THREE.Vector3) => {
+      const p = at.clone().project(camera)
+      return new THREE.Vector2((p.x * 0.5 + 0.5) * 800, (-p.y * 0.5 + 0.5) * 600)
+    }
+    const plain = onScreen(liveItems(scene)[0])
+    const rare = onScreen(rareMeshes(scene)[0].position)
+    expect(plain.distanceTo(rare)).toBeLessThan(40)
+
+    const between = plain.clone().lerp(rare, 0.4) // nearer the plain item
+    expect(view.itemAt(between.x, between.y, canvas)).toBe(2)
+    expect(view.itemAt(plain.x, plain.y, canvas)).toBe(1)
   })
 
   it('shows the coins a full jar pays', () => {

@@ -49,6 +49,7 @@ const POOL_CAPACITY = 512
 /** A rare marble is a little bigger than the others and turns as it rides, so its pattern shows. */
 const RARE_SCALE = 1.25
 const RARE_TURN = 1.4
+const RARE_PICK_BIAS = 0.5
 const RARE_AXIS = new THREE.Vector3(0.35, 1, 0.2).normalize()
 const GOLD = new THREE.Color(0xffc24a)
 
@@ -167,7 +168,17 @@ export class LineView {
     })
   }
 
-  /** The id of the belt item nearest to a screen point, or null if none is close enough. */
+  /** Puts jars on the shelf places left empty after many were filled out of sight. `shelved` is the new total. */
+  restock(shelved: number): void {
+    for (let i = Math.max(0, shelved - SHELF_PLACES); i < shelved; i++) {
+      if (!this.shelf[i % this.shelf.length]) this.addStartingShelfJar(i)
+    }
+  }
+
+  /**
+   * The id of the belt item nearest to a screen point, or null if none is close enough.
+   * A rare marble counts as nearer than it is: a click meant for it should not sort its neighbour.
+   */
   itemAt(clientX: number, clientY: number, canvas: HTMLCanvasElement): number | null {
     const rect = canvas.getBoundingClientRect()
     let best: number | null = null
@@ -176,7 +187,8 @@ export class LineView {
       this.projected.copy(visual.pos).project(this.camera)
       const x = rect.left + (this.projected.x * 0.5 + 0.5) * rect.width
       const y = rect.top + (-this.projected.y * 0.5 + 0.5) * rect.height
-      const distance = Math.hypot(x - clientX, y - clientY)
+      const reach = Math.hypot(x - clientX, y - clientY)
+      const distance = visual.mesh && reach < PICK_RADIUS_PX ? reach * RARE_PICK_BIAS : reach
       if (distance < bestDistance) {
         best = id
         bestDistance = distance

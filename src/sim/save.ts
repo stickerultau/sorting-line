@@ -36,8 +36,11 @@ export function toSave(state: SimState, now: number): SaveData {
   }
 }
 
+/** No real line reaches this. Counts stay far below the size where adding one stops changing a number. */
+const MAX_COUNT = 1e12
+
 /** A whole number from 0 to `max`. Anything else stored there becomes 0. */
-function count(value: unknown, max = Number.MAX_SAFE_INTEGER): number {
+function count(value: unknown, max = MAX_COUNT): number {
   return typeof value === 'number' && value > 0 ? Math.min(Math.floor(value), max) : 0
 }
 
@@ -76,6 +79,20 @@ export function awayEarnings(state: SimState, seconds: number): { jars: number; 
   return { jars, coins: jars * jarValue(state) }
 }
 
+/**
+ * Pays a running line for time nobody was watching, such as a tab left in the background.
+ * Returns what was paid, or null when the time was too short to earn anything.
+ */
+export function payAway(state: SimState, seconds: number): Away | null {
+  if (!(seconds >= MIN_AWAY_SECONDS)) return null
+  const { jars, coins } = awayEarnings(state, seconds)
+  if (jars === 0) return null
+  state.coins += coins
+  state.earned += coins
+  state.shelved += jars
+  return { seconds, jars, coins }
+}
+
 /** Starts the line from a save, or fresh when there is none, and pays for the time away. */
 export function resume(config: SimConfig, seed: number, data: SaveData | null, now: number): { state: SimState; away: Away | null } {
   if (!data) return { state: createSim(config, seed), away: null }
@@ -86,13 +103,7 @@ export function resume(config: SimConfig, seed: number, data: SaveData | null, n
   state.upgrades = { ...data.upgrades }
   state.collection = { ...data.collection }
 
-  const seconds = Math.floor((now - data.savedAt) / 1000)
-  if (seconds < MIN_AWAY_SECONDS) return { state, away: null }
-  const { jars, coins } = awayEarnings(state, seconds)
-  if (jars === 0) return { state, away: null }
-  state.coins += coins
-  state.earned += coins
-  state.shelved += jars
-  state.config = { ...state.config, startShelved: state.shelved }
-  return { state, away: { seconds, jars, coins } }
+  const away = payAway(state, Math.floor((now - data.savedAt) / 1000))
+  if (away) state.config = { ...state.config, startShelved: state.shelved }
+  return { state, away }
 }

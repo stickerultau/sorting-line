@@ -2,7 +2,6 @@ import * as THREE from 'three'
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js'
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js'
 import { FullScreenQuad, Pass } from 'three/addons/postprocessing/Pass.js'
-import { RenderPass } from 'three/addons/postprocessing/RenderPass.js'
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js'
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 
@@ -14,11 +13,14 @@ const QUAD_VERTEX = /* glsl */ `
   }
 `
 
+const MAX_BLUR = 0.0065
+
 /**
- * Depth of field from the depth the scene render already wrote, so the scene is not drawn twice.
- * Everything within `range` of the focus distance stays sharp; the blur grows beyond that.
+ * Draws the scene into its own anti-aliased buffer, then hands it on with depth of field, using the depth
+ * that draw already wrote. Everything within `range` of the focus distance stays sharp; the blur grows beyond that.
+ * Only this buffer is multisampled, so the full-screen passes after it stay cheap.
  */
-class FocusPass extends Pass {
+class ScenePass extends Pass {
   readonly uniforms = {
     tDiffuse: { value: null as THREE.Texture | null },
     tDepth: { value: null as THREE.Texture | null },
@@ -27,13 +29,24 @@ class FocusPass extends Pass {
     focus: { value: 30 },
     range: { value: 1.8 },
     strength: { value: 0.0011 },
-    maxBlur: { value: 0.0065 },
+    maxBlur: { value: MAX_BLUR },
     aspect: { value: 1 },
   }
   private readonly quad: FullScreenQuad
+  private readonly target: THREE.WebGLRenderTarget
+  private readonly scene: THREE.Scene
+  private readonly camera: THREE.PerspectiveCamera
 
-  constructor() {
+  constructor(scene: THREE.Scene, camera: THREE.PerspectiveCamera) {
     super()
+    this.scene = scene
+    this.camera = camera
+    this.target = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, samples: 4 })
+    this.target.depthTexture = new THREE.DepthTexture(1, 1)
+    this.uniforms.tDiffuse.value = this.target.texture
+    this.uniforms.tDepth.value = this.target.depthTexture
+    this.uniforms.near.value = camera.near
+    this.uniforms.far.value = camera.far
     this.quad = new FullScreenQuad(
       new THREE.ShaderMaterial({
         uniforms: this.uniforms,
@@ -71,18 +84,31 @@ class FocusPass extends Pass {
     )
   }
 
-  render(renderer: THREE.WebGLRenderer, writeBuffer: THREE.WebGLRenderTarget, readBuffer: THREE.WebGLRenderTarget): void {
-    this.uniforms.tDiffuse.value = readBuffer.texture
-    this.uniforms.tDepth.value = readBuffer.depthTexture
+  render(renderer: THREE.WebGLRenderer, writeBuffer: THREE.WebGLRenderTarget): void {
+    renderer.setRenderTarget(this.target)
+    renderer.render(this.scene, this.camera)
     renderer.setRenderTarget(this.renderToScreen ? null : writeBuffer)
     this.quad.render(renderer)
   }
 
   setSize(width: number, height: number): void {
+    this.target.setSize(width, height)
     this.uniforms.aspect.value = width / height
   }
 
+  /** Anti-aliasing samples for the scene. Fewer is faster and rougher at the edges. */
+  setSamples(samples: number): void {
+    if (this.target.samples === samples) return
+    this.target.dispose() // the buffer is built again, with the new sample count, the next time it is drawn to
+    this.target.samples = samples
+  }
+
+  setDepthBlur(on: boolean): void {
+    this.uniforms.maxBlur.value = on ? MAX_BLUR : 0
+  }
+
   dispose(): void {
+    this.target.dispose()
     this.quad.dispose()
   }
 }
@@ -110,7 +136,7 @@ const FinishShader = {
         texture2D(tDiffuse, vUv).g,
         texture2D(tDiffuse, vUv - shift).b
       );
-      colour *= mix(1.0 - vignette, 1.0, smoothstep(0.82, 0.28, sqrt(r2)));
+      colour *= mix(1.0, 1.0 - vignette, smoothstep(0.28, 0.82, sqrt(r2)));
       float noise = fract(sin(dot(gl_FragCoord.xy + fract(time) * 61.0, vec2(12.9898, 78.233))) * 43758.5453) - 0.5;
       colour += colour * noise * grain;
       gl_FragColor = vec4(colour, 1.0);
@@ -126,23 +152,19 @@ export interface Post {
   setFocus(distance: number): void
   /** Turns the depth blur on or off. */
   setDepthBlur(on: boolean): void
+  /** Anti-aliasing samples for the scene. */
+  setSamples(samples: number): void
 }
 
 export function createPost(renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.PerspectiveCamera): Post {
   const size = renderer.getSize(new THREE.Vector2())
-  const target = new THREE.WebGLRenderTarget(size.x, size.y, { type: THREE.HalfFloatType, samples: 4 })
-  target.depthTexture = new THREE.DepthTexture(size.x, size.y)
-  const composer = new EffectComposer(renderer, target)
-
-  const focus = new FocusPass()
-  focus.uniforms.near.value = camera.near
-  focus.uniforms.far.value = camera.far
+  const composer = new EffectComposer(renderer)
+  const view = new ScenePass(scene, camera)
   // Only light brighter than white glows: glints on glass, the lamp strip, the lamps on the rail, sparks.
   const bloom = new UnrealBloomPass(size.clone(), 0.3, 0.55, 2.4)
   const finish = new ShaderPass(FinishShader)
 
-  composer.addPass(new RenderPass(scene, camera))
-  composer.addPass(focus)
+  composer.addPass(view)
   composer.addPass(bloom)
   composer.addPass(finish)
   composer.addPass(new OutputPass())
@@ -157,10 +179,9 @@ export function createPost(renderer: THREE.WebGLRenderer, scene: THREE.Scene, ca
     setSize: (width, height) => composer.setSize(width, height),
     setPixelRatio: (ratio) => composer.setPixelRatio(ratio),
     setFocus(distance) {
-      focus.uniforms.focus.value = distance
+      view.uniforms.focus.value = distance
     },
-    setDepthBlur(on) {
-      focus.enabled = on
-    },
+    setDepthBlur: (on) => view.setDepthBlur(on),
+    setSamples: (samples) => view.setSamples(samples),
   }
 }

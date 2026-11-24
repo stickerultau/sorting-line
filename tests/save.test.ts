@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { DEFAULT_CONFIG, UPGRADES } from '../src/content/content'
-import { awayEarnings, parseSave, resume, toSave } from '../src/sim/save'
-import { createSim, feedInterval, jarValue } from '../src/sim/sim'
+import { awayEarnings, parseSave, payAway, resume, toSave } from '../src/sim/save'
+import { createSim } from '../src/sim/sim'
 
 const NOW = 1_800_000_000_000
 const HOUR = 3600
@@ -56,7 +56,7 @@ describe('saving', () => {
     })!
     expect(data.coins).toBe(0)
     expect(data.earned).toBe(0)
-    expect(Number.isSafeInteger(data.shelved)).toBe(true)
+    expect(data.shelved).toBeLessThanOrEqual(1e12)
     expect(data.sorted).toBe(12)
     expect(data.upgrades.belt).toBe(UPGRADES.find((u) => u.id === 'belt')!.maxLevel)
     expect(data.upgrades.feeder).toBe(0)
@@ -64,13 +64,33 @@ describe('saving', () => {
     expect(data.upgrades).not.toHaveProperty('bogus')
     expect(data.collection).toEqual({ oxblood: 2 })
   })
+
+  it('can still count jars up after a save with an absurd jar count', () => {
+    const data = parseSave({ ...toSave(played(), NOW), shelved: 1e99 })!
+    const { state } = resume(DEFAULT_CONFIG, 1, data, NOW + HOUR * 1000)
+    expect(state.shelved + 1).toBeGreaterThan(state.shelved)
+  })
 })
 
 describe('time away', () => {
   it('pays for jars filled while away, at the away rate', () => {
+    // An hour at half speed, four items a second, twelve to a jar: 600 jars. One level of better lids: 12 coins each.
+    expect(awayEarnings(played(), HOUR)).toEqual({ jars: 600, coins: 7200 })
+  })
+
+  it('pays into a running line, for a tab that was left in the background', () => {
     const state = played()
-    const jars = Math.floor((HOUR * DEFAULT_CONFIG.awayRate) / feedInterval(state) / DEFAULT_CONFIG.jarCapacity)
-    expect(awayEarnings(state, HOUR)).toEqual({ jars, coins: jars * jarValue(state) })
+    expect(payAway(state, HOUR)).toEqual({ seconds: HOUR, jars: 600, coins: 7200 })
+    expect(state.coins).toBe(432 + 7200)
+    expect(state.earned).toBe(900 + 7200)
+    expect(state.shelved).toBe(57 + 600)
+  })
+
+  it('pays nothing into a running line for a short pause', () => {
+    const state = played()
+    expect(payAway(state, 59)).toBeNull()
+    expect(state.coins).toBe(432)
+    expect(state.shelved).toBe(57)
   })
 
   it('adds the earnings and the jars on return', () => {

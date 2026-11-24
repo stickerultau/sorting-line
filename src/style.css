@@ -38,7 +38,14 @@ html, body {
   z-index: 1;
   pointer-events: none;
   font-size: 14px;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 10px;
+  padding: 14px;
 }
+
+/* The panels, notices and hint share the space under the bar. */
+.panel, .toasts, .hint { grid-area: 2 / 1; }
 
 .bar, .panel, .toast, .hint {
   background: var(--glass);
@@ -50,10 +57,6 @@ html, body {
 
 /* Top bar */
 .bar {
-  position: absolute;
-  top: 14px;
-  left: 14px;
-  right: 14px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -145,11 +148,10 @@ button:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
 
 /* Side panels */
 .panel {
-  position: absolute;
-  top: 78px;
-  right: 14px;
-  width: min(360px, calc(100vw - 28px));
-  max-height: calc(100vh - 92px);
+  justify-self: end;
+  align-self: start;
+  width: min(360px, 100%);
+  max-height: 100%;
   overflow-y: auto;
   padding: 16px;
   border-radius: 16px;
@@ -272,13 +274,11 @@ button:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
 
 /* Notices */
 .toasts {
-  position: absolute;
-  top: 82px;
-  left: 50%;
+  justify-self: center;
+  align-self: start;
   display: grid;
   gap: 8px;
   justify-items: center;
-  transform: translateX(-50%);
 }
 
 .toast {
@@ -317,17 +317,16 @@ button:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
 .pop-rare { color: #fff; font-size: 30px; text-shadow: 0 0 18px var(--gold), 0 0 6px var(--gold-deep), 0 2px 0 rgba(0, 0, 0, 0.5); animation-duration: 1.5s; }
 
 .hint {
-  position: absolute;
-  bottom: 16px;
-  left: 50%;
+  justify-self: center;
+  align-self: end;
   margin: 0;
   padding: 9px 16px;
   border-radius: 999px;
   color: var(--ink-soft);
-  transform: translateX(-50%);
-  max-width: calc(100vw - 28px);
   text-align: center;
 }
+
+.pops { position: fixed; inset: 0; }
 
 [hidden] { display: none !important; }
 
@@ -356,25 +355,23 @@ button:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
 
 /* Phones and narrow windows: the panels become a sheet at the bottom. */
 @media (max-width: 720px) {
-  #hud { font-size: 13px; }
-  .bar { top: 8px; left: 8px; right: 8px; padding: 8px 10px; }
+  #hud { font-size: 13px; padding: 8px; gap: 8px; }
+  .bar { padding: 8px 10px; }
   .wallet-coins { font-size: 22px; }
   .tools { gap: 4px; }
   .tool { padding: 6px 8px; font-size: 12px; }
-  .panel { top: auto; right: 8px; left: 8px; bottom: 8px; width: auto; max-height: 58vh; }
-  .toasts { top: 112px; }
+  .panel { justify-self: stretch; align-self: end; width: auto; max-height: min(100%, 58vh); }
   .toast { white-space: normal; border-radius: 18px; }
-  .hint { width: calc(100vw - 16px); border-radius: 14px; font-size: 12px; }
+  .hint { justify-self: stretch; border-radius: 14px; font-size: 12px; }
 }
 
 /* The wide strip along the bottom of a screen: keep everything small. */
 @media (max-height: 360px) {
-  .bar { top: 6px; left: 6px; right: 6px; padding: 4px 8px; border-radius: 12px; }
+  #hud { padding: 6px; gap: 6px; }
+  .bar { padding: 4px 8px; border-radius: 12px; }
   .wallet-coins { font-size: 18px; }
   .wallet > .coin { font-size: 16px; }
   .tool { padding: 4px 9px; }
-  .panel { top: 48px; max-height: calc(100vh - 54px); }
-  .toasts { top: 50px; }
   .hint { display: none; }
 }
 

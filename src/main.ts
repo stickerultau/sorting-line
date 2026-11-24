@@ -1,7 +1,7 @@
 import * as THREE from 'three'
 import './style.css'
 import { DEFAULT_CONFIG, RARES, TIER_NAME } from './content/content'
-import { parseSave, resume, toSave, type SaveData } from './sim/save'
+import { parseSave, payAway, resume, toSave, type Away, type SaveData } from './sim/save'
 import { MAX_DT, buy, flick, tick } from './sim/sim'
 import type { SimEvent } from './sim/types'
 import { createHud } from './ui/hud'
@@ -13,6 +13,8 @@ import { createStage, type Quality } from './view/scene'
 const WARM_UP_SECONDS = 8
 const SAVE_KEY = 'sorting-line-save-v1'
 const SAVE_EVERY_MS = 10_000
+/** With no frame drawn for this long the line is standing still, in a background tab or a sleeping computer. */
+const STALLED_MS = 3_000
 /** The times of day the button steps through. `null` follows the clock on this device. */
 const TIMES: { label: string; hour: number | null }[] = [
   { label: 'Clock', hour: null },
@@ -39,14 +41,27 @@ function load(): SaveData | null {
 
 const canvas = document.getElementById('stage') as HTMLCanvasElement
 const { state, away } = resume(DEFAULT_CONFIG, seed, load(), Date.now())
-const stage = createStage(canvas, params.get('quality') === 'low' ? 'low' : 'high')
+const stage = (() => {
+  try {
+    return createStage(canvas, params.get('quality') === 'low' ? 'low' : 'high')
+  } catch (error) {
+    const note = document.createElement('p')
+    note.className = 'hint'
+    note.textContent = 'This game needs WebGL 2, which this browser or device does not provide.'
+    document.getElementById('hud')!.append(note)
+    throw error
+  }
+})()
 const models = buildModels()
 const lineSet = buildSet(models, state.config)
 const audio = createAudio()
 
 let saving = !fresh
+/** When the last frame was drawn, by the clock on the wall. */
+let lastFrameAt = Date.now()
 function save(): void {
-  if (!saving) return
+  // A line that is standing still has nothing new to save, and a fresh time stamp would hide the time away.
+  if (!saving || Date.now() - lastFrameAt > STALLED_MS) return
   try {
     localStorage.setItem(SAVE_KEY, JSON.stringify(toSave(state, Date.now())))
   } catch {
@@ -96,7 +111,7 @@ const hud = createHud(
     reset() {
       saving = false
       try {
-        localStorage.removeItem(SAVE_KEY)
+        if (!fresh) localStorage.removeItem(SAVE_KEY)
       } catch {
         // Nothing was stored, so there is nothing to erase.
       }
@@ -107,11 +122,12 @@ const hud = createHud(
 )
 
 // Coins earned on the line float up from where they were earned.
-let warmingUp = true
+/** Seconds of play before the numbers show. Jars filled in the warm-up below pay nothing, so they announce nothing. */
+let quiet = 1
 const onScreen = new THREE.Vector3()
 const fx: LineFx = {
   pop(at, text, tone) {
-    if (warmingUp) return
+    if (quiet > 0) return
     const rect = canvas.getBoundingClientRect()
     onScreen.copy(at).project(stage.camera)
     hud.pop(rect.left + (onScreen.x * 0.5 + 0.5) * rect.width, rect.top + (-onScreen.y * 0.5 + 0.5) * rect.height, text, tone)
@@ -121,16 +137,18 @@ const view = new LineView(stage.scene, stage.camera, models, lineSet, state.conf
 view.setOrientation(stage.orientation())
 
 // Run the line for a few seconds before the first frame, so the page opens on a working line.
-// Nothing is earned for it: reloading the page must not pay.
-const before = { coins: state.coins, earned: state.earned, collection: { ...state.collection } }
+// Nothing is earned for it: reloading the page must not pay. The spotter arm rests, so no rare marble is used up.
+const before = { coins: state.coins, earned: state.earned, spotter: state.upgrades.spotter }
+state.upgrades.spotter = 0
 view.silent = true
 for (let t = 0; t < WARM_UP_SECONDS; t += 1 / 32) {
   view.handle(tick(state, 1 / 32))
   view.update(state, 1 / 32)
 }
 view.silent = false
-warmingUp = false
-Object.assign(state, before)
+state.coins = before.coins
+state.earned = before.earned
+state.upgrades.spotter = before.spotter
 
 function apply(events: SimEvent[]): void {
   view.handle(events)
@@ -142,12 +160,21 @@ function apply(events: SimEvent[]): void {
   }
 }
 
-if (away) {
-  const hours = Math.floor(away.seconds / 3600)
-  const minutes = Math.floor((away.seconds % 3600) / 60)
+function welcomeBack(paid: Away): void {
+  const hours = Math.floor(paid.seconds / 3600)
+  const minutes = Math.floor((paid.seconds % 3600) / 60)
   const gone = hours > 0 ? `${hours} h ${minutes} min` : `${minutes} min`
-  hud.toast('Welcome back', `Away ${gone} · ${away.jars.toLocaleString('en-US')} jars · +${away.coins.toLocaleString('en-US')} coins`)
+  hud.toast('Welcome back', `Away ${gone} · ${paid.jars.toLocaleString('en-US')} jars · +${paid.coins.toLocaleString('en-US')} coins`)
 }
+if (away) welcomeBack(away)
+
+// Two tabs saving in turn would overwrite each other. The tab that sees another one save stops saving.
+const warnOtherTab = () => hud.toast('Open in another tab', 'This tab has stopped saving. Progress is kept in the other one.')
+window.addEventListener('storage', (event) => {
+  if (!saving || (event.key !== null && event.key !== SAVE_KEY)) return
+  saving = false
+  warnOtherTab()
+})
 
 // For checks from the browser console and automated smoke tests.
 const debug = { state, stage, handSorts: 0 }
@@ -171,6 +198,7 @@ new ResizeObserver(() => {
 setInterval(save, SAVE_EVERY_MS)
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) save()
+  else if (!saving && !fresh) warnOtherTab()
 })
 window.addEventListener('pagehide', save)
 
@@ -179,6 +207,16 @@ function frame(now: number): void {
   requestAnimationFrame(frame)
   const dt = Math.min((now - last) / 1000, MAX_DT)
   last = now
+  // Frames stop in a background tab. On return, the line is paid for the gap as for any other time away.
+  const wall = Date.now()
+  const paid = payAway(state, Math.floor((wall - lastFrameAt) / 1000))
+  lastFrameAt = wall
+  if (paid) {
+    view.restock(state.shelved)
+    welcomeBack(paid)
+    save()
+  }
+  quiet -= dt
   if (dt > 0) {
     apply(tick(state, dt))
     view.update(state, dt)

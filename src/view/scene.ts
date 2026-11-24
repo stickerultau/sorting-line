@@ -19,7 +19,7 @@ export interface Stage {
   orientation(): Orientation
   /** Moves the light to an hour of the day (0 to 24). It glides there unless `instant` is set. */
   setHour(hour: number, instant?: boolean): void
-  /** 'low' drops the depth blur, the lamp's shadows and the extra pixels of sharp screens. */
+  /** 'low' drops the depth blur and the lamp's shadows, smooths edges less and ignores the extra pixels of sharp screens. */
   setQuality(quality: Quality): void
   quality(): Quality
   /** Advances the light and the dust, then draws a frame. Returns the light now showing. */
@@ -137,6 +137,7 @@ export function createStage(canvas: HTMLCanvasElement, startQuality: Quality = '
     renderer.setPixelRatio(ratio)
     post.setPixelRatio(ratio)
     post.setDepthBlur(quality === 'high')
+    post.setSamples(quality === 'high' ? 4 : 2)
     lamp.castShadow = quality === 'high'
     resize()
   }
