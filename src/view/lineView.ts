@@ -110,7 +110,9 @@ export class LineView {
     this.tweens.update(dt)
     for (const item of state.items) {
       const visual = this.belt.get(item.id) ?? this.addBeltVisual(item, 0)
-      visual.pos.set(item.x, REST_Y[visual.family] + visual.drop, visual.lane)
+      // The simulation moves in whole steps. Add the time carried between steps, so items glide with the belt.
+      const x = item.x + state.config.beltSpeed * state.acc
+      visual.pos.set(x, REST_Y[visual.family] + visual.drop, visual.lane)
       this.write(visual)
     }
   }
@@ -182,6 +184,18 @@ export class LineView {
     jar.pos.set(place.x, place.y, place.z)
     jar.scale = place.scale
     this.placeJar(jar)
+  }
+
+  /** Shrinks away the jar at a shelf place, making room before the next one lands. */
+  private clearShelfPlace(index: number): void {
+    const old = this.shelf[index]
+    if (!old) return
+    this.shelf[index] = null
+    const size = old.scale
+    this.tweens.add(0.25, (k) => {
+      old.scale = Math.max(0.001, size * (1 - ease.in(k)))
+      this.placeJar(old)
+    }, { done: () => this.removeJar(old) })
   }
 
   private removeJar(jar: JarVisual): void {
@@ -302,6 +316,7 @@ export class LineView {
       done: () => {
         if (!this.silent) this.audio.tock()
         const from = jar.pos.clone()
+        this.clearShelfPlace(index)
         this.tweens.add(0.7, (k) => {
           // Read the shelf place every frame, so a jar in flight follows a change of screen shape.
           const place = shelfSlot(index, this.orientation)
