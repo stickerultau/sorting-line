@@ -9,6 +9,9 @@ export interface LineAudio {
   snap(): void
   tock(): void
   bonus(): void
+  /** A rare marble caught. Higher tiers ring longer. */
+  rare(tier: number): void
+  buy(): void
 }
 
 /** Synthesized placeholder sounds. Final foley comes later, per the development plan. */
@@ -84,6 +87,18 @@ export function createAudio(): LineAudio {
     bonus() {
       tone(1320, 0.1, 0.16, 'sine')
       tone(1760, 0.16, 0.16, 'sine', undefined, 0.07)
+    },
+    rare(tier) {
+      const notes = [880, 1108.7, 1318.5, 1760, 2217.5, 2637]
+      for (let i = 0; i < 3 + tier; i++) {
+        tone(notes[i], 0.5, 0.16, 'sine', undefined, i * 0.075)
+        tone(notes[i] * 2, 0.25, 0.05, 'triangle', undefined, i * 0.075)
+      }
+    },
+    buy() {
+      tone(520, 0.09, 0.2, 'triangle')
+      tone(780, 0.14, 0.2, 'triangle', undefined, 0.08)
+      noise(0.03, 0.1, 2400)
     },
   }
 }

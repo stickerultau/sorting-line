@@ -1,8 +1,12 @@
 import * as THREE from 'three'
-import { COLOUR_HEX, type ColourId, type FamilyId, type SimConfig } from '../content/content'
+import { COLOUR_HEX, RARES, type ColourId, type FamilyId, type RareId, type SimConfig } from '../content/content'
 import { ITEM_RADIUS, JAR, SHELVES, type Orientation } from './layout'
+import { paintGlow, paintMarble, paintPlainMarble } from './marbleArt'
 
 // Placeholder shapes built in code. Artist-made models replace these after the clip test.
+
+/** Tests build the models without a browser, where nothing can be painted. Shapes and materials still work. */
+const CAN_PAINT = typeof document !== 'undefined'
 
 /** Jars stand on the table. */
 export const TABLE_Y = JAR.topY - JAR.height
@@ -13,6 +17,8 @@ export const REST_Y: Record<FamilyId, number> = { marble: ITEM_RADIUS, button: 0
 const RIB_SPACING = 0.5
 const CREAM = 0xf4eee2
 const WALL = 0x7fa293
+const LED_READY = 0x35ff8a
+const LED_BUSY = 0xff9a2a
 
 export interface Models {
   itemGeometry: Record<FamilyId, THREE.BufferGeometry>
@@ -21,6 +27,10 @@ export interface Models {
   glass: THREE.Material
   lidGeometry: THREE.BufferGeometry
   enamel: Record<ColourId, THREE.Material>
+  rareGeometry: THREE.BufferGeometry
+  rareMaterial: Record<RareId, THREE.Material>
+  /** The halo round a rare marble, and the shape of every spark. Null where nothing can be painted. */
+  glowMap: THREE.Texture | null
 }
 
 export interface LineSet {
@@ -31,6 +41,10 @@ export interface LineSet {
   scrollBelt(distance: number): void
   /** Shows the shelf boards that match the screen shape. */
   setShelf(orientation: Orientation): void
+  /** The small lamp on the rail above a station: green with a jar in place, amber while it is swapped. */
+  setLed(station: number, ready: boolean): void
+  /** Lights the strip under the shelf. 0 is off, 1 is fully on. */
+  setLamp(level: number): void
   /** Where new items appear. */
   chute: THREE.Vector3
   /** Where unsorted items land. */
@@ -98,6 +112,50 @@ function buttonGeometry(): THREE.BufferGeometry {
   return geometry
 }
 
+function pegboardTexture(): THREE.CanvasTexture {
+  return canvasTexture(64, (g, size) => {
+    g.fillStyle = '#ffffff'
+    g.fillRect(0, 0, size, size)
+    g.fillStyle = 'rgba(28,44,38,0.6)'
+    g.beginPath()
+    g.arc(size / 2, size / 2, 5, 0, Math.PI * 2)
+    g.fill()
+    g.strokeStyle = 'rgba(255,255,255,0.5)'
+    g.lineWidth = 1.5
+    g.beginPath()
+    g.arc(size / 2, size / 2 + 1, 5.5, 0.2, Math.PI - 0.2)
+    g.stroke()
+  })
+}
+
+function paintedTexture(canvas: HTMLCanvasElement): THREE.CanvasTexture {
+  const texture = new THREE.CanvasTexture(canvas)
+  texture.colorSpace = THREE.SRGBColorSpace
+  texture.wrapS = THREE.RepeatWrapping
+  texture.anisotropy = 8
+  return texture
+}
+
+function rareMaterials(): Record<RareId, THREE.Material> {
+  const materials = {} as Record<RareId, THREE.Material>
+  for (const kind of RARES) {
+    const map = CAN_PAINT ? paintedTexture(paintMarble(kind)) : null
+    materials[kind.id] = new THREE.MeshPhysicalMaterial({
+      map,
+      roughness: 0.05,
+      clearcoat: 1,
+      clearcoatRoughness: 0.02,
+      // A rare marble glows a little from inside, more the rarer it is, so it stands out even at night.
+      emissive: 0xffffff,
+      emissiveMap: map,
+      emissiveIntensity: [0, 0.35, 0.55, 0.9][kind.tier],
+      iridescence: kind.pattern === 'nebula' ? 1 : 0,
+      iridescenceIOR: 1.6,
+    })
+  }
+  return materials
+}
+
 const lathe = (points: [number, number][], segments = 40) =>
   new THREE.LatheGeometry(points.map(([x, y]) => new THREE.Vector2(x, y)), segments)
 
@@ -110,7 +168,12 @@ export function buildModels(): Models {
       button: buttonGeometry(),
     },
     itemMaterial: {
-      marble: new THREE.MeshPhysicalMaterial({ roughness: 0.06, clearcoat: 1, clearcoatRoughness: 0.03 }),
+      marble: new THREE.MeshPhysicalMaterial({
+        map: CAN_PAINT ? paintedTexture(paintPlainMarble()) : null,
+        roughness: 0.06,
+        clearcoat: 1,
+        clearcoatRoughness: 0.03,
+      }),
       button: new THREE.MeshPhysicalMaterial({ roughness: 0.36, clearcoat: 0.7, clearcoatRoughness: 0.2 }),
     },
     jarGeometry: lathe([
@@ -132,6 +195,9 @@ export function buildModels(): Models {
       yellow: enamel(COLOUR_HEX.yellow),
       blue: enamel(COLOUR_HEX.blue),
     },
+    rareGeometry: new THREE.SphereGeometry(ITEM_RADIUS, 48, 32),
+    rareMaterial: rareMaterials(),
+    glowMap: CAN_PAINT ? new THREE.CanvasTexture(paintGlow()) : null,
   }
 }
 
@@ -147,6 +213,8 @@ export function buildSet(models: Models, config: SimConfig): LineSet {
   creamOpen.side = THREE.DoubleSide
   const steel = new THREE.MeshStandardMaterial({ color: 0xc9ced2, metalness: 0.9, roughness: 0.32 })
   const rubber = new THREE.MeshStandardMaterial({ color: 0x25272b, roughness: 0.9 })
+  const brass = new THREE.MeshStandardMaterial({ color: 0xd9a441, metalness: 1, roughness: 0.24 })
+  const strip = new THREE.MeshStandardMaterial({ color: 0x2a2018, emissive: 0xffb062, emissiveIntensity: 0 })
   const beltMap = beltTexture()
   beltMap.repeat.set((length + 0.8) / RIB_SPACING, 1)
   const beltTop = new THREE.MeshStandardMaterial({ map: beltMap, roughness: 0.85 })
@@ -162,7 +230,9 @@ export function buildSet(models: Models, config: SimConfig): LineSet {
   const box = (w: number, h: number, d: number) => new THREE.BoxGeometry(w, h, d)
 
   // Room
-  const wall = add(new THREE.PlaneGeometry(140, 70), new THREE.MeshStandardMaterial({ color: WALL, roughness: 1 }), 8, 14, -2.3)
+  const pegboard = pegboardTexture()
+  pegboard.repeat.set(140 / 0.6, 70 / 0.6)
+  const wall = add(new THREE.PlaneGeometry(140, 70), new THREE.MeshStandardMaterial({ color: WALL, map: pegboard, roughness: 0.95 }), 8, 14, -2.3)
   wall.castShadow = false
   const top = add(new THREE.PlaneGeometry(140, 44), table, 8, TABLE_Y, 19.6)
   top.rotation.x = -Math.PI / 2
@@ -174,14 +244,21 @@ export function buildSet(models: Models, config: SimConfig): LineSet {
     add(new THREE.CylinderGeometry(0.2, 0.2, BELT_HALF_DEPTH * 2 + 0.1, 24), steel, x, -0.12, 0).rotation.x = Math.PI / 2
   }
   add(box(length + 0.3, 0.5, 1.05), cream, length / 2, -0.4, 0)
+  add(box(length + 0.3, 0.035, 0.02), brass, length / 2, -0.2, 0.535)
+  add(box(length + 0.3, 0.035, 0.02), brass, length / 2, -0.6, 0.535)
   for (const x of [0.6, 4, 7.5, 10.5, 14, length - 0.6]) {
     for (const z of [-0.4, 0.4]) add(box(0.18, TABLE_Y * -1 - 0.65, 0.18), wood, x, (TABLE_Y - 0.65) / 2, z)
   }
 
   // Back rail with a colour plate and a flipper at each station
   add(box(length + 0.8, 0.5, 0.08), cream, length / 2, 0.25, -0.7)
+  const leds: THREE.MeshStandardMaterial[] = []
   const flippers = config.stations.map((station) => {
     add(box(0.74, 0.3, 0.03), models.enamel[station.colour], station.x, 0.3, -0.645)
+    const led = new THREE.MeshStandardMaterial({ color: 0x101010, emissive: LED_READY, emissiveIntensity: 4 })
+    leds.push(led)
+    add(new THREE.SphereGeometry(0.055, 16, 10), led, station.x, 0.53, -0.7).castShadow = false
+    add(new THREE.CylinderGeometry(0.075, 0.075, 0.03, 20), brass, station.x, 0.505, -0.7)
     const pivot = new THREE.Group()
     pivot.position.set(station.x - 0.5, 0.2, -0.54)
     add(box(1, 0.26, 0.09), models.enamel[station.colour], 0.5, 0, 0, pivot)
@@ -194,6 +271,7 @@ export function buildSet(models: Models, config: SimConfig): LineSet {
   add(new THREE.CylinderGeometry(0.85, 0.32, 0.9, 36, 1, true), creamOpen, 0, 1.6, 0)
   add(new THREE.CylinderGeometry(0.32, 0.32, 0.32, 36, 1, true), creamOpen, 0, 1.0, 0)
   add(box(0.12, 1.5, 0.12), wood, 0, 0.75, -0.76)
+  add(new THREE.TorusGeometry(0.85, 0.03, 10, 48), brass, 0, 2.05, 0).rotation.x = Math.PI / 2
 
   // Mixed bin for items that reach the end unsorted
   const binX = length + 1.15
@@ -213,6 +291,10 @@ export function buildSet(models: Models, config: SimConfig): LineSet {
     for (let row = 0; row < shelf.rows; row++) {
       add(box(shelf.columns * shelf.dx + 0.5, 0.07, 1.56 * shelf.scale), wood, centre, shelf.y0 + row * shelf.dy - 0.035, shelf.z, set)
     }
+    // The lamp strip under the lowest board.
+    const glow = add(box(shelf.columns * shelf.dx + 0.3, 0.035, 0.06), strip, centre, shelf.y0 - 0.09, shelf.z + 0.7 * shelf.scale, set)
+    glow.castShadow = false
+    glow.receiveShadow = false
     set.visible = orientation === 'wide'
     group.add(set)
     return set
@@ -228,6 +310,12 @@ export function buildSet(models: Models, config: SimConfig): LineSet {
     setShelf(orientation) {
       shelves.wide.visible = orientation === 'wide'
       shelves.tall.visible = orientation === 'tall'
+    },
+    setLed(station, ready) {
+      leds[station].emissive.setHex(ready ? LED_READY : LED_BUSY)
+    },
+    setLamp(level) {
+      strip.emissiveIntensity = 7 * level
     },
     chute: new THREE.Vector3(0, 0.95, 0),
     bin: new THREE.Vector3(binX, -0.75, 0),

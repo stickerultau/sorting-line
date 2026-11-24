@@ -1,10 +1,10 @@
 import * as THREE from 'three'
 import { describe, expect, it } from 'vitest'
 import { DEFAULT_CONFIG, type SimConfig } from '../src/content/content'
-import { createSim, tick } from '../src/sim/sim'
+import { createSim, flick, tick } from '../src/sim/sim'
 import type { SimState } from '../src/sim/types'
 import type { LineAudio } from '../src/view/audio'
-import { LineView } from '../src/view/lineView'
+import { LineView, type LineFx } from '../src/view/lineView'
 import { buildModels, type LineSet } from '../src/view/models'
 
 // The view runs here without a browser: real models and scene graph, no renderer.
@@ -17,6 +17,8 @@ const silentAudio: LineAudio = {
   snap() {},
   tock() {},
   bonus() {},
+  rare() {},
+  buy() {},
 }
 
 function bareSet(config: SimConfig): LineSet {
@@ -25,16 +27,22 @@ function bareSet(config: SimConfig): LineSet {
     flippers: config.stations.map(() => new THREE.Group()),
     scrollBelt() {},
     setShelf() {},
+    setLed() {},
+    setLamp() {},
     chute: new THREE.Vector3(0, 0.95, 0),
     bin: new THREE.Vector3(config.beltLength + 1.15, -0.75, 0),
   }
 }
 
-function makeView(state: SimState): { view: LineView; scene: THREE.Scene } {
+function makeView(state: SimState): { view: LineView; scene: THREE.Scene; pops: string[] } {
   const scene = new THREE.Scene()
-  const view = new LineView(scene, new THREE.PerspectiveCamera(), buildModels(), bareSet(state.config), state.config, silentAudio)
-  return { view, scene }
+  const pops: string[] = []
+  const fx: LineFx = { pop: (_at, text) => pops.push(text) }
+  const view = new LineView(scene, new THREE.PerspectiveCamera(), buildModels(), bareSet(state.config), state.config, silentAudio, fx)
+  return { view, scene, pops }
 }
+
+const rareMeshes = (scene: THREE.Scene) => scene.children.filter((child) => child.userData.rare)
 
 /** World positions of every item instance that is actually on show (freed ones are parked far below). */
 function liveItems(scene: THREE.Scene): THREE.Vector3[] {
@@ -74,7 +82,7 @@ describe('LineView', () => {
     expect(liveItems(scene)).toHaveLength(30 * 12)
 
     // An empty jar leaves station 0 for shelf place 0, which is taken.
-    view.handle([{ type: 'jarFull', station: 0, shelfIndex: 30 }])
+    view.handle([{ type: 'jarFull', station: 0, shelfIndex: 30, coins: 10 }])
     for (let t = 0; t < 1.2; t += 1 / 32) view.update(state, 1 / 32) // the new jar is still in flight
     expect(liveItems(scene)).toHaveLength(29 * 12)
   })
@@ -91,6 +99,38 @@ describe('LineView', () => {
 
     expect(state.shelved).toBeGreaterThan(300)
     const inJars = state.stations.reduce((sum, station) => sum + station.count, 0)
-    expect(liveItems(scene)).toHaveLength(state.items.length + inJars + 30 * DEFAULT_CONFIG.jarCapacity)
+    const rares = state.items.filter((item) => item.rare).length
+    expect(liveItems(scene)).toHaveLength(state.items.length - rares + inJars + 30 * DEFAULT_CONFIG.jarCapacity)
+    expect(rareMeshes(scene)).toHaveLength(rares)
+  })
+
+  it('shows a rare marble as its own mesh and takes it away once it is caught', () => {
+    const state = createSim(QUIET, 1)
+    state.items.push({ id: 1, family: 'marble', colour: 'red', x: 2, rare: 'galaxy' })
+    const { view, scene, pops } = makeView(state)
+    view.update(state, 0)
+    expect(liveItems(scene)).toHaveLength(0)
+    expect(rareMeshes(scene)).toHaveLength(1)
+    expect(rareMeshes(scene)[0].position.x).toBe(2)
+
+    view.handle(flick(state, 1))
+    for (let t = 0; t < 3; t += 1 / 32) view.update(state, 1 / 32)
+    expect(rareMeshes(scene)).toHaveLength(0)
+    expect(pops).toEqual(['+1000'])
+  })
+
+  it('fills every shelf place when the line resumes with many jars', () => {
+    const state = createSim({ ...QUIET, startShelved: 500 }, 1)
+    const { view, scene } = makeView(state)
+    view.update(state, 0)
+    expect(liveItems(scene)).toHaveLength(30 * 12)
+  })
+
+  it('shows the coins a full jar pays', () => {
+    const state = createSim(QUIET, 1)
+    const { view, pops } = makeView(state)
+    view.handle([{ type: 'jarFull', station: 1, shelfIndex: 0, coins: 14 }])
+    for (let t = 0; t < 2; t += 1 / 32) view.update(state, 1 / 32)
+    expect(pops).toEqual(['+14'])
   })
 })

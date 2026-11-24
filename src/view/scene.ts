@@ -1,7 +1,11 @@
 import * as THREE from 'three'
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js'
+import { daylight, type Daylight } from './daylight'
 import { fitDistance, orientationFor, type Orientation } from './layout'
+import { paintGlow, paintWindow } from './marbleArt'
+import { createPost } from './post'
 
+export type Quality = 'high' | 'low'
 
 export interface Stage {
   scene: THREE.Scene
@@ -13,6 +17,13 @@ export interface Stage {
   toggleView(): void
   /** 'tall' for a phone held upright, otherwise 'wide'. */
   orientation(): Orientation
+  /** Moves the light to an hour of the day (0 to 24). It glides there unless `instant` is set. */
+  setHour(hour: number, instant?: boolean): void
+  /** 'low' drops the depth blur, the lamp's shadows and the extra pixels of sharp screens. */
+  setQuality(quality: Quality): void
+  quality(): Quality
+  /** Advances the light and the dust, then draws a frame. Returns the light now showing. */
+  render(dt: number): Daylight
 }
 
 const FOV = 22
@@ -24,42 +35,80 @@ const FRAMES = {
   tall: { x: 9, y: 4.0, width: 8, height: 12.4 },
 }
 
-export function createStage(canvas: HTMLCanvasElement): Stage {
-  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true })
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
+const SUN_TARGET = new THREE.Vector3(8.5, 0.6, 0)
+const SUN_DISTANCE = 46
+const LAMP_POWER = 52
+/** Hours of daylight the light moves through per second when the time of day is changed. */
+const GLIDE_HOURS_PER_SECOND = 5
+const DUST = 240
+const DUST_BOX = { x: [-2, 19], y: [-1.2, 6.5], z: [-1.8, 5] } as const
+
+export function createStage(canvas: HTMLCanvasElement, startQuality: Quality = 'high'): Stage {
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance' })
   renderer.toneMapping = THREE.NeutralToneMapping
-  renderer.toneMappingExposure = 1
   renderer.shadowMap.enabled = true
   renderer.shadowMap.type = THREE.PCFShadowMap
 
   const scene = new THREE.Scene()
-  scene.background = new THREE.Color(0x7fa293)
+  scene.background = new THREE.Color(0x10141a)
   const pmrem = new THREE.PMREMGenerator(renderer)
   scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture
-  scene.environmentIntensity = 0.7
   pmrem.dispose()
 
-  scene.add(new THREE.HemisphereLight(0xffffff, 0xb59d84, 0.3))
-  const key = new THREE.DirectionalLight(0xfff1de, 2.1)
-  key.position.set(4, 12, 10)
-  key.target.position.set(9, 0, 0)
-  key.castShadow = true
-  key.shadow.mapSize.set(2048, 2048)
-  const shadow = key.shadow.camera
-  shadow.left = -14
-  shadow.right = 14
-  shadow.top = 16
-  shadow.bottom = -9
-  shadow.near = 1
-  shadow.far = 45
-  key.shadow.bias = -0.0004
-  key.shadow.normalBias = 0.03
-  key.shadow.radius = 3
-  scene.add(key, key.target)
+  // Sky light, then the sun or moon shining through a window behind the camera, then the lamp over the line.
+  const sky = new THREE.HemisphereLight(0xffffff, 0x9a8672, 0.3)
+  const sun = new THREE.SpotLight(0xffffff, 2, 0, 0.3, 0.18, 0)
+  sun.target.position.copy(SUN_TARGET)
+  sun.map = new THREE.CanvasTexture(paintWindow())
+  sun.map.colorSpace = THREE.SRGBColorSpace
+  sun.castShadow = true
+  sun.shadow.mapSize.set(2048, 2048)
+  sun.shadow.camera.near = 20
+  sun.shadow.camera.far = 80
+  sun.shadow.bias = -0.0002
+  sun.shadow.normalBias = 0.03
+  sun.shadow.radius = 2.5
+
+  const lamp = new THREE.SpotLight(0xffb070, 0, 0, 1.0, 0.85, 1)
+  lamp.position.set(9, 6.6, 1.7)
+  lamp.target.position.set(9, -0.7, 0.1)
+  lamp.shadow.mapSize.set(1024, 1024)
+  lamp.shadow.camera.near = 1
+  lamp.shadow.camera.far = 16
+  lamp.shadow.bias = -0.0006
+  lamp.shadow.normalBias = 0.03
+  lamp.shadow.radius = 4
+  scene.add(sky, sun, sun.target, lamp, lamp.target)
+
+  // Dust drifting in the light.
+  const dustAt = new Float32Array(DUST * 3)
+  for (let i = 0; i < DUST; i++) {
+    dustAt[i * 3] = THREE.MathUtils.randFloat(...DUST_BOX.x)
+    dustAt[i * 3 + 1] = THREE.MathUtils.randFloat(...DUST_BOX.y)
+    dustAt[i * 3 + 2] = THREE.MathUtils.randFloat(...DUST_BOX.z)
+  }
+  const dustGeometry = new THREE.BufferGeometry()
+  dustGeometry.setAttribute('position', new THREE.BufferAttribute(dustAt, 3))
+  const dustMaterial = new THREE.PointsMaterial({
+    size: 0.07,
+    map: new THREE.CanvasTexture(paintGlow()),
+    transparent: true,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+  })
+  const dust = new THREE.Points(dustGeometry, dustMaterial)
+  dust.frustumCulled = false
+  scene.add(dust)
 
   const camera = new THREE.PerspectiveCamera(FOV, 1, 1, 300)
+  const post = createPost(renderer, scene, camera)
   /** The choice made with the view button. Null means pick by screen shape. */
   let chosen: 'whole' | 'detail' | null = null
+  let quality: Quality = startQuality
+  let hour = 12
+  let wantedHour = 12
+  let light = daylight(hour)
+  let time = 0
 
   const orientation = () => orientationFor(camera.aspect)
   const showsWholeLine = () => (chosen ? chosen === 'whole' : orientation() === 'wide' && camera.aspect >= 2.6)
@@ -69,6 +118,7 @@ export function createStage(canvas: HTMLCanvasElement): Stage {
     const distance = fitDistance(frame.width, frame.height, FOV, camera.aspect) + 1.8
     camera.position.set(frame.x, frame.y + Math.sin(ELEVATION) * distance, Math.cos(ELEVATION) * distance)
     camera.lookAt(frame.x, frame.y, 0)
+    post.setFocus(distance)
   }
 
   const resize = () => {
@@ -76,12 +126,38 @@ export function createStage(canvas: HTMLCanvasElement): Stage {
     const height = canvas.clientHeight
     if (width === 0 || height === 0) return
     renderer.setSize(width, height, false)
+    post.setSize(width, height)
     camera.aspect = width / height
     camera.updateProjectionMatrix()
     place()
   }
 
-  resize()
+  const applyQuality = () => {
+    const ratio = quality === 'high' ? Math.min(window.devicePixelRatio, 2) : 1
+    renderer.setPixelRatio(ratio)
+    post.setPixelRatio(ratio)
+    post.setDepthBlur(quality === 'high')
+    lamp.castShadow = quality === 'high'
+    resize()
+  }
+
+  const applyLight = () => {
+    light = daylight(hour)
+    sun.position.set(...light.sun).multiplyScalar(SUN_DISTANCE).add(SUN_TARGET)
+    sun.color.setRGB(...light.sunColour)
+    sun.intensity = light.sunPower
+    sky.color.setRGB(...light.sky)
+    sky.intensity = light.skyPower
+    scene.environmentIntensity = light.env
+    lamp.intensity = light.lamp * LAMP_POWER
+    renderer.toneMappingExposure = light.exposure
+    dustMaterial.color.setRGB(...light.sunColour).multiplyScalar(0.5 + light.sunPower * 0.5)
+    dustMaterial.opacity = 0.16 + 0.1 * light.sunPower
+  }
+
+  applyQuality()
+  applyLight()
+
   return {
     scene,
     camera,
@@ -92,5 +168,35 @@ export function createStage(canvas: HTMLCanvasElement): Stage {
       place()
     },
     orientation,
+    setHour(next, instant = false) {
+      wantedHour = ((next % 24) + 24) % 24
+      if (!instant) return
+      hour = wantedHour
+      applyLight()
+    },
+    setQuality(next) {
+      quality = next
+      applyQuality()
+    },
+    quality: () => quality,
+    render(dt) {
+      time += dt
+      // Glide toward the wanted hour the short way round the clock.
+      const gap = ((wantedHour - hour + 36) % 24) - 12
+      if (gap !== 0) {
+        const move = Math.min(Math.abs(gap), GLIDE_HOURS_PER_SECOND * dt)
+        hour = (hour + Math.sign(gap) * move + 24) % 24
+        applyLight()
+      }
+      for (let i = 0; i < DUST; i++) {
+        const at = i * 3
+        dustAt[at] += (0.05 + 0.03 * Math.sin(i)) * dt
+        dustAt[at + 1] += Math.sin(time * 0.3 + i * 1.7) * 0.03 * dt
+        if (dustAt[at] > DUST_BOX.x[1]) dustAt[at] = DUST_BOX.x[0]
+      }
+      dustGeometry.attributes.position.needsUpdate = true
+      post.render(dt)
+      return light
+    },
   }
 }

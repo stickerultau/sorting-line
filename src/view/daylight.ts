@@ -31,7 +31,7 @@ interface Key {
 
 const NIGHT = {
   azimuth: -32, elevation: 48,
-  sunColour: [0.5, 0.64, 1] as Rgb, sunPower: 0.42,
+  sunColour: [0.5, 0.64, 1] as Rgb, sunPower: 0.34,
   sky: [0.34, 0.44, 0.8] as Rgb, skyPower: 0.1,
   env: 0.1, lamp: 1, exposure: 1.05,
 }
@@ -40,11 +40,11 @@ const NIGHT = {
 const KEYS: Key[] = [
   { hour: 0, ...NIGHT },
   { hour: 5.5, ...NIGHT },
-  { hour: 7, azimuth: 58, elevation: 15, sunColour: [1, 0.6, 0.36], sunPower: 2.3, sky: [0.95, 0.74, 0.7], skyPower: 0.2, env: 0.34, lamp: 0.25, exposure: 1 },
-  { hour: 9, azimuth: 40, elevation: 34, sunColour: [1, 0.92, 0.8], sunPower: 2.6, sky: [0.86, 0.93, 1], skyPower: 0.3, env: 0.6, lamp: 0, exposure: 1 },
-  { hour: 13, azimuth: 4, elevation: 58, sunColour: [1, 0.97, 0.92], sunPower: 2.4, sky: [0.88, 0.94, 1], skyPower: 0.34, env: 0.7, lamp: 0, exposure: 1 },
-  { hour: 17, azimuth: -38, elevation: 32, sunColour: [1, 0.87, 0.68], sunPower: 2.6, sky: [0.95, 0.9, 0.86], skyPower: 0.3, env: 0.58, lamp: 0, exposure: 1 },
-  { hour: 19, azimuth: -60, elevation: 13, sunColour: [1, 0.53, 0.26], sunPower: 2.3, sky: [0.95, 0.68, 0.6], skyPower: 0.2, env: 0.32, lamp: 0.35, exposure: 1 },
+  { hour: 7, azimuth: 50, elevation: 16, sunColour: [1, 0.5, 0.24], sunPower: 3.2, sky: [0.62, 0.6, 0.86], skyPower: 0.15, env: 0.22, lamp: 0.25, exposure: 1 },
+  { hour: 9, azimuth: 40, elevation: 34, sunColour: [1, 0.92, 0.8], sunPower: 2.0, sky: [0.86, 0.93, 1], skyPower: 0.3, env: 0.6, lamp: 0, exposure: 1 },
+  { hour: 13, azimuth: 4, elevation: 58, sunColour: [1, 0.97, 0.92], sunPower: 1.85, sky: [0.88, 0.94, 1], skyPower: 0.34, env: 0.7, lamp: 0, exposure: 1 },
+  { hour: 17, azimuth: -38, elevation: 32, sunColour: [1, 0.87, 0.68], sunPower: 2.0, sky: [0.95, 0.9, 0.86], skyPower: 0.3, env: 0.58, lamp: 0, exposure: 1 },
+  { hour: 19, azimuth: -52, elevation: 14, sunColour: [1, 0.44, 0.18], sunPower: 3.2, sky: [0.6, 0.55, 0.85], skyPower: 0.15, env: 0.2, lamp: 0.35, exposure: 1 },
   { hour: 20.25, azimuth: -46, elevation: 30, sunColour: [0.56, 0.6, 0.95], sunPower: 0.4, sky: [0.45, 0.5, 0.85], skyPower: 0.13, env: 0.14, lamp: 1, exposure: 1.05 },
   { hour: 21.5, ...NIGHT },
   { hour: 24, ...NIGHT },

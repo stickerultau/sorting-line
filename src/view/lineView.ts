@@ -1,10 +1,12 @@
 import * as THREE from 'three'
-import type { ColourId, FamilyId, SimConfig } from '../content/content'
+import { COLOUR_HEX, RARES, type ColourId, type FamilyId, type RareId, type SimConfig } from '../content/content'
+import { beltSpeed } from '../sim/sim'
 import type { BeltItem, SimEvent, SimState } from '../sim/types'
 import type { LineAudio } from './audio'
 import { ItemPool } from './itemPool'
 import { JAR, SHELF_PLACES, jarSlot, shelfSlot, type Orientation } from './layout'
 import { REST_Y, TABLE_Y, type LineSet, type Models } from './models'
+import { Sparks } from './sparks'
 import { Tweens, ease } from './tween'
 
 interface Visual {
@@ -13,6 +15,13 @@ interface Visual {
   pos: THREE.Vector3
   quat: THREE.Quaternion
   scale: number
+  /** A rare marble is a mesh of its own. Everything else is an instance in the pool, found by `handle`. */
+  mesh?: THREE.Mesh
+}
+
+/** Where the view reports things for the overlay to show, such as coins earned at a place on the line. */
+export interface LineFx {
+  pop(at: THREE.Vector3, text: string, tone: 'coin' | 'tip' | 'rare'): void
 }
 
 interface BeltVisual extends Visual {
@@ -37,6 +46,11 @@ const LID_START = 0.9
 const FLIPPER_SWING = -1.15
 const PICK_RADIUS_PX = 40
 const POOL_CAPACITY = 512
+/** A rare marble is a little bigger than the others and turns as it rides, so its pattern shows. */
+const RARE_SCALE = 1.25
+const RARE_TURN = 1.4
+const RARE_AXIS = new THREE.Vector3(0.35, 1, 0.2).normalize()
+const GOLD = new THREE.Color(0xffc24a)
 
 /** Repeatable pseudo-random number in [0, 1) from two integers. Keeps the look stable between runs. */
 function noise(n: number, salt: number): number {
@@ -78,41 +92,67 @@ export class LineView {
   private readonly shelf: (JarVisual | null)[] = new Array(SHELF_PLACES).fill(null)
   private orientation: Orientation = 'wide'
   private readonly projected = new THREE.Vector3()
+  private readonly sparks: Sparks
+  private readonly fx: LineFx
+  private readonly turn = new THREE.Quaternion()
   private travelled = 0
+  private clock = 0
 
-  constructor(scene: THREE.Scene, camera: THREE.Camera, models: Models, set: LineSet, config: SimConfig, audio: LineAudio) {
+  constructor(
+    scene: THREE.Scene,
+    camera: THREE.Camera,
+    models: Models,
+    set: LineSet,
+    config: SimConfig,
+    audio: LineAudio,
+    fx: LineFx = { pop() {} },
+  ) {
     this.scene = scene
     this.camera = camera
     this.models = models
     this.set = set
     this.config = config
     this.audio = audio
+    this.fx = fx
     this.pool = new ItemPool(scene, models, POOL_CAPACITY)
-    scene.add(set.group)
+    this.sparks = new Sparks(600, models.glowMap)
+    scene.add(set.group, this.sparks.points)
 
     this.stationJars = config.stations.map((station) => this.makeJar(station.colour, this.stationBase(station.x), 1))
-    for (let i = 0; i < config.startShelved; i++) this.addStartingShelfJar(i)
+    // A line that resumes with hundreds of jars shows the newest ones, one per shelf place.
+    for (let i = Math.max(0, config.startShelved - SHELF_PLACES); i < config.startShelved; i++) this.addStartingShelfJar(i)
+    config.stations.forEach((_, station) => set.setLed(station, true))
   }
 
   handle(events: SimEvent[]): void {
     for (const event of events) {
       if (event.type === 'spawned') this.onSpawned(event.item)
-      else if (event.type === 'sorted') this.onSorted(event.item, event.station, event.slot, event.byHand)
-      else if (event.type === 'jarFull') this.onJarFull(event.station, event.shelfIndex)
+      else if (event.type === 'sorted') this.onSorted(event.item, event.station, event.slot, event.byHand, event.coins)
+      else if (event.type === 'jarFull') this.onJarFull(event.station, event.shelfIndex, event.coins)
       else if (event.type === 'jarReady') this.onJarReady(event.station)
+      else if (event.type === 'caught') this.onCaught(event.item, event.rare, event.byHand, event.coins)
       else this.onRecycled(event.item)
     }
   }
 
   update(state: SimState, dt: number): void {
-    this.travelled += state.config.beltSpeed * dt
+    const speed = beltSpeed(state)
+    this.travelled += speed * dt
+    this.clock += dt
     this.set.scrollBelt(this.travelled)
     this.tweens.update(dt)
+    this.sparks.update(dt)
+    this.turn.setFromAxisAngle(RARE_AXIS, RARE_TURN * dt)
     for (const item of state.items) {
       const visual = this.belt.get(item.id) ?? this.addBeltVisual(item, 0)
       // The simulation moves in whole steps. Add the time carried between steps, so items glide with the belt.
-      const x = item.x + state.config.beltSpeed * state.acc
-      visual.pos.set(x, REST_Y[visual.family] + visual.drop, visual.lane)
+      const x = item.x + speed * state.acc
+      visual.pos.set(x, REST_Y[visual.family] * visual.scale + visual.drop, visual.lane)
+      if (visual.mesh) {
+        visual.quat.premultiply(this.turn)
+        const halo = visual.mesh.children[0] as THREE.Sprite | undefined
+        if (halo) halo.material.opacity = 0.5 + 0.25 * Math.sin(this.clock * 4 + item.id)
+      }
       this.write(visual)
     }
   }
@@ -150,7 +190,43 @@ export class LineView {
   }
 
   private write(visual: Visual): void {
-    this.pool.set(visual.family, visual.handle, visual.pos, visual.quat, visual.scale)
+    if (!visual.mesh) {
+      this.pool.set(visual.family, visual.handle, visual.pos, visual.quat, visual.scale)
+      return
+    }
+    visual.mesh.position.copy(visual.pos)
+    visual.mesh.quaternion.copy(visual.quat)
+    visual.mesh.scale.setScalar(visual.scale)
+  }
+
+  /** Takes a visual off show for good. */
+  private release(visual: Visual): void {
+    if (!visual.mesh) {
+      this.pool.release(visual.family, visual.handle)
+      return
+    }
+    this.scene.remove(visual.mesh)
+    for (const child of visual.mesh.children) (child as THREE.Sprite).material.dispose()
+  }
+
+  private makeRareMesh(rare: RareId): THREE.Mesh {
+    const mesh = new THREE.Mesh(this.models.rareGeometry, this.models.rareMaterial[rare])
+    mesh.castShadow = true
+    mesh.userData.rare = rare
+    const kind = RARES.find((r) => r.id === rare)!
+    const halo = new THREE.Sprite(
+      new THREE.SpriteMaterial({
+        map: this.models.glowMap,
+        color: new THREE.Color(kind.palette[1]).multiplyScalar(1.2 + kind.tier * 0.5),
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        transparent: true,
+      }),
+    )
+    halo.scale.setScalar(1.3 + kind.tier * 0.35)
+    mesh.add(halo)
+    this.scene.add(mesh)
+    return mesh
   }
 
   private makeJar(colour: ColourId, pos: THREE.Vector3, scale: number): JarVisual {
@@ -205,6 +281,7 @@ export class LineView {
 
   private addStartingShelfJar(index: number): void {
     const colour = this.config.stations[index % this.config.stations.length].colour
+    const place = index % this.shelf.length
     const jar = this.makeJar(colour, new THREE.Vector3(), 1)
     for (let slot = 0; slot < this.config.jarCapacity; slot++) {
       const seed = index * 97 + slot
@@ -223,19 +300,24 @@ export class LineView {
     }
     jar.lid.visible = true
     jar.lidLift = 0
-    this.moveToShelf(jar, index)
-    this.shelf[index % this.shelf.length] = jar
+    this.moveToShelf(jar, place)
+    this.shelf[place] = jar
   }
 
   private addBeltVisual(item: BeltItem, drop: number): BeltVisual {
+    const scale = item.rare ? RARE_SCALE : 1
     const visual: BeltVisual = {
       family: item.family,
-      handle: this.pool.alloc(item.family, item.colour),
-      pos: new THREE.Vector3(item.x, REST_Y[item.family] + drop, 0),
+      handle: item.rare ? -1 : this.pool.alloc(item.family, item.colour),
+      pos: new THREE.Vector3(item.x, REST_Y[item.family] * scale + drop, 0),
       quat: restQuaternion(item.family, item.id),
-      scale: 1,
+      scale,
       lane: (noise(item.id, 8) - 0.5) * 0.5,
       drop,
+    }
+    if (item.rare) {
+      visual.mesh = this.makeRareMesh(item.rare)
+      this.write(visual)
     }
     this.belt.set(item.id, visual)
     return visual
@@ -249,15 +331,16 @@ export class LineView {
     })
   }
 
-  private onSorted(item: BeltItem, station: number, slot: number, byHand: boolean): void {
+  private onSorted(item: BeltItem, station: number, slot: number, byHand: boolean, coins: number): void {
     const visual = this.belt.get(item.id)
     const jar = this.stationJars[station]
     if (!visual) return
     this.belt.delete(item.id)
     if (!jar) {
-      this.pool.release(visual.family, visual.handle)
+      this.release(visual)
       return
     }
+    if (coins > 0) this.fx.pop(visual.pos, `+${coins}`, 'tip')
 
     const place = jarSlot(slot)
     const local = new THREE.Vector3(place.x, place.y, place.z)
@@ -299,10 +382,12 @@ export class LineView {
     })
   }
 
-  private onJarFull(station: number, shelfIndex: number): void {
+  private onJarFull(station: number, shelfIndex: number, coins: number): void {
     const jar = this.stationJars[station]
     if (!jar) return
     this.stationJars[station] = null
+    this.set.setLed(station, false)
+    const colour = new THREE.Color(COLOUR_HEX[this.config.stations[station].colour])
     const index = shelfIndex % this.shelf.length
     const to = new THREE.Vector3()
 
@@ -315,6 +400,10 @@ export class LineView {
       delay: 0.46,
       done: () => {
         if (!this.silent) this.audio.tock()
+        const rim = jar.pos.clone().setY(jar.pos.y + JAR.height)
+        if (coins > 0) this.fx.pop(rim, `+${coins}`, 'coin')
+        this.sparks.burst(rim, GOLD, 10, 1.6, 2.2)
+        this.sparks.burst(rim, colour, 8, 1.3, 2.2)
         const from = jar.pos.clone()
         this.clearShelfPlace(index)
         this.tweens.add(0.7, (k) => {
@@ -342,6 +431,7 @@ export class LineView {
     const { x, colour } = this.config.stations[station]
     const jar = this.makeJar(colour, this.stationBase(x), 0.001)
     this.stationJars[station] = jar
+    this.set.setLed(station, true)
     this.tweens.add(0.32, (k) => {
       jar.scale = Math.max(0.001, ease.outBack(k))
       this.placeJar(jar)
@@ -353,11 +443,45 @@ export class LineView {
     if (!visual) return
     this.belt.delete(item.id)
     const from = visual.pos.clone()
+    const size = visual.scale
     this.tweens.add(0.5, (k) => {
       visual.pos.lerpVectors(from, this.set.bin, ease.in(k))
       visual.pos.y += Math.sin(Math.PI * k) * 0.35
-      visual.scale = 1 - 0.5 * k
+      visual.scale = size * (1 - 0.5 * k)
       this.write(visual)
-    }, { done: () => this.pool.release(visual.family, visual.handle) })
+    }, { done: () => this.release(visual) })
+  }
+
+  /** A caught rare marble lifts off the belt toward the viewer, flares and is gone. */
+  private onCaught(item: BeltItem, rare: RareId, byHand: boolean, coins: number): void {
+    const visual = this.belt.get(item.id)
+    if (!visual) return
+    this.belt.delete(item.id)
+    const kind = RARES.find((r) => r.id === rare)!
+    const glow = new THREE.Color(kind.palette[1])
+    const from = visual.pos.clone()
+    const to = from.clone().add(new THREE.Vector3(0, byHand ? 1.7 : 1.1, 0.9))
+    const size = visual.scale
+    this.fx.pop(from, `+${coins}`, 'rare')
+    this.sparks.burst(from, glow, 26, 2.6, 4)
+    this.sparks.burst(from, GOLD, 14, 1.8, 3)
+    if (!this.silent) this.audio.rare(kind.tier)
+
+    this.tweens.add(0.75, (k) => {
+      visual.pos.lerpVectors(from, to, ease.out(k))
+      visual.scale = size * (1 + 1.1 * ease.outBack(k))
+      this.turn.setFromAxisAngle(UP, 0.35 * (1 - k))
+      visual.quat.premultiply(this.turn)
+      this.write(visual)
+    }, {
+      done: () => {
+        this.sparks.burst(to, glow, 34, 3.4, 5)
+        const full = visual.scale
+        this.tweens.add(0.22, (k) => {
+          visual.scale = Math.max(0.001, full * (1 - ease.in(k)))
+          this.write(visual)
+        }, { done: () => this.release(visual) })
+      },
+    })
   }
 }
