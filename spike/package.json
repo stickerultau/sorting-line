@@ -1,0 +1,19 @@
+{
+  "name": "line-spike",
+  "version": "0.0.0",
+  "private": true,
+  "description": "THROWAWAY technical spike. Not part of the game. Never import from src/.",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "pack": "electron-packager . line-spike --platform=win32 --arch=x64 --out=out --overwrite --asar.unpackDir=\"node_modules/steamworks.js\" --ignore=\"^/out\" --ignore=\"^/state.json\""
+  },
+  "dependencies": {
+    "steamworks.js": "0.4.0",
+    "three": "0.187.0"
+  },
+  "devDependencies": {
+    "@electron/packager": "20.3.0",
+    "electron": "45.4.1"
+  }
+}

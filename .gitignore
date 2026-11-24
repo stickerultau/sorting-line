@@ -5,3 +5,4 @@ spike/out/
 spike/node_modules/
 spike/state.json
 *.log
+spike/strip.png
