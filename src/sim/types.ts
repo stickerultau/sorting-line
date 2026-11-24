@@ -1,8 +1,10 @@
-import type { ColourId, FamilyId, SimConfig } from '../content/content'
+import type { ColourId, FamilyId, RareId, SimConfig, UpgradeId } from '../content/content'
 
 export interface ItemKind {
   family: FamilyId
   colour: ColourId
+  /** Set on a rare marble. The flippers leave these alone; they are caught, not sorted. */
+  rare?: RareId
 }
 
 export interface BeltItem extends ItemKind {
@@ -36,11 +38,18 @@ export interface SimState {
   created: number
   /** Items ever placed in a jar. */
   sorted: number
+  coins: number
+  /** Coins ever earned. Spending does not lower it. */
+  earned: number
+  upgrades: Record<UpgradeId, number>
+  /** How many of each rare marble have been caught. */
+  collection: Partial<Record<RareId, number>>
 }
 
 export type SimEvent =
   | { type: 'spawned'; item: BeltItem }
-  | { type: 'sorted'; item: BeltItem; station: number; slot: number; byHand: boolean }
-  | { type: 'jarFull'; station: number; shelfIndex: number }
+  | { type: 'sorted'; item: BeltItem; station: number; slot: number; byHand: boolean; coins: number }
+  | { type: 'jarFull'; station: number; shelfIndex: number; coins: number }
+  | { type: 'caught'; item: BeltItem; rare: RareId; byHand: boolean; coins: number; first: boolean }
   | { type: 'jarReady'; station: number }
   | { type: 'recycled'; item: BeltItem }
