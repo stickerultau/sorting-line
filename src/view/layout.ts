@@ -6,7 +6,7 @@ export const ITEM_RADIUS = 0.2
 /** A jar stands in front of the belt, its rim just below the belt surface. */
 export const JAR = { radius: 0.55, height: 1.35, topY: -0.35, z: 1.3 }
 
-export const SHELF = { columns: 10, rows: 3, scale: 0.55, x0: 1.6, dx: 1.42, y0: 1.0, dy: 0.95, z: -1.5 }
+export const SHELF = { columns: 10, rows: 3, scale: 0.55, x0: 4.6, dx: 0.98, y0: 1.0, dy: 0.95, z: -1.5 }
 
 const RING_RADIUS = 0.3
 const LAYER_HEIGHT = 0.34
