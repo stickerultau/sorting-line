@@ -19,6 +19,8 @@ const models = buildModels()
 const audio = createAudio()
 const view = new LineView(stage.scene, stage.camera, models, buildSet(models, state.config), state.config, audio)
 
+view.setOrientation(stage.orientation())
+
 // Run the line for a few seconds before the first frame, so the page opens on a working line.
 view.silent = true
 for (let t = 0; t < WARM_UP_SECONDS; t += 1 / 32) {
@@ -51,7 +53,10 @@ canvas.addEventListener('pointerdown', (event) => {
   view.handle(events)
 })
 
-new ResizeObserver(() => stage.resize()).observe(canvas)
+new ResizeObserver(() => {
+  stage.resize()
+  view.setOrientation(stage.orientation())
+}).observe(canvas)
 
 let last = performance.now()
 function frame(now: number): void {

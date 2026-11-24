@@ -1,8 +1,7 @@
 import * as THREE from 'three'
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js'
-import { fitDistance } from './layout'
+import { fitDistance, orientationFor, type Orientation } from './layout'
 
-export type ViewMode = 'full' | 'close'
 
 export interface Stage {
   scene: THREE.Scene
@@ -12,15 +11,17 @@ export interface Stage {
   resize(): void
   /** Switches between the whole line and a close-up of the three stations. */
   toggleView(): void
+  /** 'tall' for a phone held upright, otherwise 'wide'. */
+  orientation(): Orientation
 }
 
 const FOV = 22
 const ELEVATION = (13 * Math.PI) / 180
-const FRAME_HEIGHT = 6.2
-const FRAME_Y = 1.0
-const FRAMES: Record<ViewMode, { x: number; width: number }> = {
-  full: { x: 8.2, width: 21.4 },
-  close: { x: 9, width: 10.8 },
+/** What the camera frames: the whole line, the three stations, or the stations under the tall phone shelf. */
+const FRAMES = {
+  full: { x: 8.2, y: 0.8, width: 21.4, height: 7.4 },
+  close: { x: 9, y: 1.0, width: 10.8, height: 6.2 },
+  tall: { x: 9, y: 4.0, width: 8, height: 12.4 },
 }
 
 export function createStage(canvas: HTMLCanvasElement): Stage {
@@ -47,7 +48,7 @@ export function createStage(canvas: HTMLCanvasElement): Stage {
   const shadow = key.shadow.camera
   shadow.left = -14
   shadow.right = 14
-  shadow.top = 9
+  shadow.top = 16
   shadow.bottom = -9
   shadow.near = 1
   shadow.far = 45
@@ -57,15 +58,17 @@ export function createStage(canvas: HTMLCanvasElement): Stage {
   scene.add(key, key.target)
 
   const camera = new THREE.PerspectiveCamera(FOV, 1, 1, 300)
-  let chosen: ViewMode | null = null
+  /** The choice made with the view button. Null means pick by screen shape. */
+  let chosen: 'whole' | 'detail' | null = null
 
-  const mode = (): ViewMode => chosen ?? (camera.aspect >= 2.6 ? 'full' : 'close')
+  const orientation = () => orientationFor(camera.aspect)
+  const showsWholeLine = () => (chosen ? chosen === 'whole' : orientation() === 'wide' && camera.aspect >= 2.6)
   const place = () => {
-    const frame = FRAMES[mode()]
+    const frame = showsWholeLine() ? FRAMES.full : orientation() === 'tall' ? FRAMES.tall : FRAMES.close
     // The extra distance covers the jars, which stand in front of the framing plane.
-    const distance = fitDistance(frame.width, FRAME_HEIGHT, FOV, camera.aspect) + 1.8
-    camera.position.set(frame.x, FRAME_Y + Math.sin(ELEVATION) * distance, Math.cos(ELEVATION) * distance)
-    camera.lookAt(frame.x, FRAME_Y, 0)
+    const distance = fitDistance(frame.width, frame.height, FOV, camera.aspect) + 1.8
+    camera.position.set(frame.x, frame.y + Math.sin(ELEVATION) * distance, Math.cos(ELEVATION) * distance)
+    camera.lookAt(frame.x, frame.y, 0)
   }
 
   const resize = () => {
@@ -85,8 +88,9 @@ export function createStage(canvas: HTMLCanvasElement): Stage {
     renderer,
     resize,
     toggleView() {
-      chosen = mode() === 'full' ? 'close' : 'full'
+      chosen = showsWholeLine() ? 'detail' : 'whole'
       place()
     },
+    orientation,
   }
 }

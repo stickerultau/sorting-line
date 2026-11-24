@@ -6,7 +6,30 @@ export const ITEM_RADIUS = 0.2
 /** A jar stands in front of the belt, its rim just below the belt surface. */
 export const JAR = { radius: 0.55, height: 1.35, topY: -0.35, z: 1.3 }
 
-export const SHELF = { columns: 10, rows: 3, scale: 0.55, x0: 4.6, dx: 0.98, y0: 1.0, dy: 0.95, z: -1.5 }
+export type Orientation = 'wide' | 'tall'
+
+export interface ShelfLayout {
+  columns: number
+  rows: number
+  /** Size of a shelved jar relative to a jar on the line. */
+  scale: number
+  x0: number
+  dx: number
+  y0: number
+  dy: number
+  z: number
+}
+
+/** The shelf holds 30 jars either way: three long rows on a wide screen, six short rows of bigger jars on a phone. */
+export const SHELVES: Record<Orientation, ShelfLayout> = {
+  wide: { columns: 10, rows: 3, scale: 0.55, x0: 4.6, dx: 0.98, y0: 1.0, dy: 0.95, z: -1.5 },
+  tall: { columns: 5, rows: 6, scale: 0.8, x0: 6.2, dx: 1.4, y0: 1.0, dy: 1.5, z: -1.5 },
+}
+export const SHELF_PLACES = 30
+
+export function orientationFor(aspect: number): Orientation {
+  return aspect < 1 ? 'tall' : 'wide'
+}
 
 const RING_RADIUS = 0.3
 const LAYER_HEIGHT = 0.34
@@ -25,13 +48,14 @@ export function jarSlot(slot: number): { x: number; y: number; z: number } {
 }
 
 /** World position of the nth shelved jar. The shelf holds 30 and then reuses places. */
-export function shelfSlot(index: number): { x: number; y: number; z: number; scale: number } {
-  const i = index % (SHELF.columns * SHELF.rows)
+export function shelfSlot(index: number, orientation: Orientation = 'wide'): { x: number; y: number; z: number; scale: number } {
+  const shelf = SHELVES[orientation]
+  const i = index % SHELF_PLACES
   return {
-    x: SHELF.x0 + (i % SHELF.columns) * SHELF.dx,
-    y: SHELF.y0 + Math.floor(i / SHELF.columns) * SHELF.dy,
-    z: SHELF.z,
-    scale: SHELF.scale,
+    x: shelf.x0 + (i % shelf.columns) * shelf.dx,
+    y: shelf.y0 + Math.floor(i / shelf.columns) * shelf.dy,
+    z: shelf.z,
+    scale: shelf.scale,
   }
 }
 

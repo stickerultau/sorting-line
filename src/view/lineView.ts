@@ -3,7 +3,7 @@ import type { ColourId, FamilyId, SimConfig } from '../content/content'
 import type { BeltItem, SimEvent, SimState } from '../sim/types'
 import type { LineAudio } from './audio'
 import { ItemPool } from './itemPool'
-import { JAR, SHELF, jarSlot, shelfSlot } from './layout'
+import { JAR, SHELF_PLACES, jarSlot, shelfSlot, type Orientation } from './layout'
 import { REST_Y, TABLE_Y, type LineSet, type Models } from './models'
 import { Tweens, ease } from './tween'
 
@@ -75,7 +75,8 @@ export class LineView {
   private readonly tweens = new Tweens()
   private readonly belt = new Map<number, BeltVisual>()
   private readonly stationJars: (JarVisual | null)[]
-  private readonly shelf: (JarVisual | null)[] = new Array(SHELF.columns * SHELF.rows).fill(null)
+  private readonly shelf: (JarVisual | null)[] = new Array(SHELF_PLACES).fill(null)
+  private orientation: Orientation = 'wide'
   private readonly projected = new THREE.Vector3()
   private travelled = 0
 
@@ -112,6 +113,16 @@ export class LineView {
       visual.pos.set(item.x, REST_Y[visual.family] + visual.drop, visual.lane)
       this.write(visual)
     }
+  }
+
+  /** Rearranges the shelf for a wide screen or an upright phone. */
+  setOrientation(orientation: Orientation): void {
+    if (orientation === this.orientation) return
+    this.orientation = orientation
+    this.set.setShelf(orientation)
+    this.shelf.forEach((jar, index) => {
+      if (jar) this.moveToShelf(jar, index)
+    })
   }
 
   /** The id of the belt item nearest to a screen point, or null if none is close enough. */
@@ -165,6 +176,14 @@ export class LineView {
     }
   }
 
+  /** Puts a jar at its shelf place for the current screen shape. */
+  private moveToShelf(jar: JarVisual, index: number): void {
+    const place = shelfSlot(index, this.orientation)
+    jar.pos.set(place.x, place.y, place.z)
+    jar.scale = place.scale
+    this.placeJar(jar)
+  }
+
   private removeJar(jar: JarVisual): void {
     this.scene.remove(jar.glass, jar.lid)
     for (const { visual } of jar.items) this.pool.release(visual.family, visual.handle)
@@ -172,8 +191,7 @@ export class LineView {
 
   private addStartingShelfJar(index: number): void {
     const colour = this.config.stations[index % this.config.stations.length].colour
-    const place = shelfSlot(index)
-    const jar = this.makeJar(colour, new THREE.Vector3(place.x, place.y, place.z), place.scale)
+    const jar = this.makeJar(colour, new THREE.Vector3(), 1)
     for (let slot = 0; slot < this.config.jarCapacity; slot++) {
       const seed = index * 97 + slot
       const family = this.config.families[Math.floor(noise(seed, 7) * this.config.families.length)]
@@ -191,7 +209,7 @@ export class LineView {
     }
     jar.lid.visible = true
     jar.lidLift = 0
-    this.placeJar(jar)
+    this.moveToShelf(jar, index)
     this.shelf[index % this.shelf.length] = jar
   }
 
@@ -272,8 +290,7 @@ export class LineView {
     if (!jar) return
     this.stationJars[station] = null
     const index = shelfIndex % this.shelf.length
-    const place = shelfSlot(shelfIndex)
-    const to = new THREE.Vector3(place.x, place.y, place.z)
+    const to = new THREE.Vector3()
 
     // Wait for the last item to land, drop the lid, then carry the jar to the shelf.
     jar.lid.visible = true
@@ -286,8 +303,10 @@ export class LineView {
         if (!this.silent) this.audio.tock()
         const from = jar.pos.clone()
         this.tweens.add(0.7, (k) => {
+          // Read the shelf place every frame, so a jar in flight follows a change of screen shape.
+          const place = shelfSlot(index, this.orientation)
           const e = ease.inOut(k)
-          jar.pos.lerpVectors(from, to, e)
+          jar.pos.lerpVectors(from, to.set(place.x, place.y, place.z), e)
           jar.pos.y += Math.sin(Math.PI * k) * 1.8
           jar.scale = 1 + (place.scale - 1) * e
           this.placeJar(jar)
@@ -297,6 +316,7 @@ export class LineView {
             const old = this.shelf[index]
             if (old) this.removeJar(old)
             this.shelf[index] = jar
+            this.moveToShelf(jar, index)
           },
         })
       },

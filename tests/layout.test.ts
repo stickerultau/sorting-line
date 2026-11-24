@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { ITEM_RADIUS, JAR, SHELF, fitDistance, jarSlot, shelfSlot } from '../src/view/layout'
+import { ITEM_RADIUS, JAR, SHELVES, fitDistance, jarSlot, orientationFor, shelfSlot } from '../src/view/layout'
 
 const slots = Array.from({ length: 12 }, (_, i) => jarSlot(i))
 
@@ -28,7 +28,7 @@ describe('jarSlot', () => {
 
 describe('shelfSlot', () => {
   it('gives 30 distinct places and then wraps', () => {
-    const total = SHELF.columns * SHELF.rows
+    const total = SHELVES.wide.columns * SHELVES.wide.rows
     expect(total).toBe(30)
     const keys = new Set(Array.from({ length: total }, (_, i) => {
       const s = shelfSlot(i)
@@ -47,5 +47,42 @@ describe('fitDistance', () => {
     const tan = Math.tan((15 * Math.PI) / 180)
     expect(wide).toBeCloseTo(2.5 / tan, 6)
     expect(tall).toBeCloseTo(5 / (tan * 0.5), 6)
+  })
+})
+
+describe('tall (phone) shelf', () => {
+  const tall = SHELVES.tall
+  const places = Array.from({ length: 30 }, (_, i) => shelfSlot(i, 'tall'))
+
+  it('holds the same 30 jars as the wide shelf', () => {
+    expect(tall.columns * tall.rows).toBe(30)
+    expect(new Set(places.map((p) => `${p.x.toFixed(3)},${p.y.toFixed(3)}`)).size).toBe(30)
+    expect(shelfSlot(30, 'tall')).toEqual(shelfSlot(0, 'tall'))
+  })
+
+  it('fits inside a frame 8 units wide centred on the middle station', () => {
+    const jarHalfWidth = 0.66 * tall.scale // the lid is the widest part of a jar
+    for (const p of places) {
+      expect(p.x - jarHalfWidth).toBeGreaterThanOrEqual(9 - 4)
+      expect(p.x + jarHalfWidth).toBeLessThanOrEqual(9 + 4)
+    }
+  })
+
+  it('leaves room between neighbouring jars and between rows', () => {
+    expect(tall.dx).toBeGreaterThan(2 * 0.66 * tall.scale)
+    expect(tall.dy).toBeGreaterThan((JAR.height + 0.26) * tall.scale)
+  })
+
+  it('shows bigger jars than the wide shelf', () => {
+    expect(tall.scale).toBeGreaterThan(SHELVES.wide.scale)
+  })
+})
+
+describe('orientationFor', () => {
+  it('is tall for a phone held upright and wide otherwise', () => {
+    expect(orientationFor(9 / 16)).toBe('tall')
+    expect(orientationFor(0.99)).toBe('tall')
+    expect(orientationFor(1)).toBe('wide')
+    expect(orientationFor(16 / 9)).toBe('wide')
   })
 })

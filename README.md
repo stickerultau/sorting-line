@@ -32,7 +32,7 @@ Then open http://localhost:5173.
 2. Press **H** to hide the overlay, and click once so the sound is on.
 3. Record the window. On Windows, **Win + Alt + R** starts and stops a recording of the active window.
 
-Known limit: the line is wide, so a tall phone-shaped window leaves empty wall and table above and below it. Record in a wide window for now.
+For TikTok, Shorts and Reels, make the window tall and narrow (9:16). The shelf then stacks into six short rows of bigger jars above the three stations. A wide window shows three long rows instead.
 
 ## What is here
 

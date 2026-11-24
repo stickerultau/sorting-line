@@ -1,6 +1,6 @@
 import * as THREE from 'three'
 import { COLOUR_HEX, type ColourId, type FamilyId, type SimConfig } from '../content/content'
-import { ITEM_RADIUS, JAR, SHELF } from './layout'
+import { ITEM_RADIUS, JAR, SHELVES, type Orientation } from './layout'
 
 // Placeholder shapes built in code. Artist-made models replace these after the clip test.
 
@@ -29,6 +29,8 @@ export interface LineSet {
   flippers: THREE.Object3D[]
   /** Moves the belt surface to match the distance the line has travelled. */
   scrollBelt(distance: number): void
+  /** Shows the shelf boards that match the screen shape. */
+  setShelf(orientation: Orientation): void
   /** Where new items appear. */
   chute: THREE.Vector3
   /** Where unsorted items land. */
@@ -204,16 +206,28 @@ export function buildSet(models: Models, config: SimConfig): LineSet {
   add(box(0.9, TABLE_Y * -1 - 1.05, 0.9), cream, binX, (TABLE_Y - 1.05) / 2, 0)
 
   // Shelf
-  const shelfCentre = SHELF.x0 + ((SHELF.columns - 1) * SHELF.dx) / 2
-  for (let row = 0; row < SHELF.rows; row++) {
-    add(box(SHELF.columns * SHELF.dx + 0.5, 0.07, 0.86), wood, shelfCentre, SHELF.y0 + row * SHELF.dy - 0.035, SHELF.z)
+  const boards = (orientation: Orientation) => {
+    const shelf = SHELVES[orientation]
+    const set = new THREE.Group()
+    const centre = shelf.x0 + ((shelf.columns - 1) * shelf.dx) / 2
+    for (let row = 0; row < shelf.rows; row++) {
+      add(box(shelf.columns * shelf.dx + 0.5, 0.07, 1.56 * shelf.scale), wood, centre, shelf.y0 + row * shelf.dy - 0.035, shelf.z, set)
+    }
+    set.visible = orientation === 'wide'
+    group.add(set)
+    return set
   }
+  const shelves: Record<Orientation, THREE.Group> = { wide: boards('wide'), tall: boards('tall') }
 
   return {
     group,
     flippers,
     scrollBelt(distance) {
       beltMap.offset.x = -((distance / RIB_SPACING) % 1)
+    },
+    setShelf(orientation) {
+      shelves.wide.visible = orientation === 'wide'
+      shelves.tall.visible = orientation === 'tall'
     },
     chute: new THREE.Vector3(0, 0.95, 0),
     bin: new THREE.Vector3(binX, -0.75, 0),
