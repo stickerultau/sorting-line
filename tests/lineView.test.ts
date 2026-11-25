@@ -17,11 +17,14 @@ const silentAudio: LineAudio = {
   snap() {},
   tock() {},
   bonus() {},
+  jar() {},
   rare() {},
   buy() {},
   order() {},
   rush() {},
   star() {},
+  lucky() {},
+  gift() {},
 }
 
 function bareSet(config: SimConfig): LineSet {
@@ -168,6 +171,51 @@ describe('LineView', () => {
     const between = plain.clone().lerp(rare, 0.4) // nearer the plain item
     expect(view.itemAt(between.x, between.y, canvas)).toBe(2)
     expect(view.itemAt(plain.x, plain.y, canvas)).toBe(1)
+  })
+
+  it('shows the lucky marble only while one is there, and finds a click on it', () => {
+    const state = createSim(QUIET, 1)
+    const camera = new THREE.PerspectiveCamera(50, 800 / 600, 0.1, 100)
+    camera.position.set(8, 2, 16)
+    camera.lookAt(8, 0, 0)
+    camera.updateMatrixWorld()
+    const { view, scene } = makeView(state, camera)
+    const canvas = { getBoundingClientRect: () => ({ left: 0, top: 0, width: 800, height: 600 }) } as HTMLCanvasElement
+    const lucky = () => scene.children.find((child) => child.userData.lucky)!
+    view.update(state, 1 / 60)
+    expect(lucky().visible).toBe(false)
+    expect(view.luckyAt(400, 300, canvas)).toBe(false)
+
+    state.luckyLeft = state.config.luckySeconds / 2
+    view.update(state, 1 / 60)
+    expect(lucky().visible).toBe(true)
+    const p = lucky().position.clone().project(camera)
+    const x = (p.x * 0.5 + 0.5) * 800
+    const y = (-p.y * 0.5 + 0.5) * 600
+    expect(view.luckyAt(x + 10, y - 10, canvas)).toBe(true)
+    expect(view.luckyAt(x + 200, y, canvas)).toBe(false)
+    const before = lucky().position.x
+    state.luckyLeft -= 1
+    view.update(state, 1)
+    expect(lucky().position.x).not.toBe(before) // it drifts along the line while it stays
+
+    state.luckyLeft = 0
+    view.update(state, 1 / 60)
+    expect(lucky().visible).toBe(false)
+    expect(view.luckyAt(x, y, canvas)).toBe(false)
+  })
+
+  it('says what a lucky marble gave, where it was caught', () => {
+    const state = createSim(QUIET, 1)
+    const { view, pops } = makeView(state)
+    view.handle([
+      { type: 'luckyCaught', gift: 'coins', coins: 600 },
+      { type: 'luckyCaught', gift: 'frenzy', coins: 0 },
+      { type: 'luckyCaught', gift: 'shower', coins: 0 },
+      { type: 'luckyCaught', gift: 'order', coins: 0, slot: 1 },
+      { type: 'luckyCaught', gift: 'upgrade', coins: 0, upgrade: 'belt' },
+    ])
+    expect(pops).toEqual(['+600', 'Frenzy!', 'Rare shower!', 'Order done!', 'Free upgrade!'])
   })
 
   it('shows the coins a full jar pays', () => {

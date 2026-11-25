@@ -1,5 +1,5 @@
 import * as THREE from 'three'
-import { COLOUR_HEX, RARES, type ColourId, type FamilyId, type RareId, type SimConfig } from '../content/content'
+import { COLOUR_HEX, RARES, type ColourId, type FamilyId, type LuckyGift, type RareId, type SimConfig } from '../content/content'
 import { beltSpeed } from '../sim/sim'
 import type { BeltItem, SimEvent, SimState } from '../sim/types'
 import type { LineAudio } from './audio'
@@ -22,7 +22,7 @@ interface Visual {
 
 /** Where the view reports things for the overlay to show, such as coins earned at a place on the line. */
 export interface LineFx {
-  pop(at: THREE.Vector3, text: string, tone: 'coin' | 'tip' | 'rare'): void
+  pop(at: THREE.Vector3, text: string, tone: 'coin' | 'tip' | 'rare' | 'gift'): void
 }
 
 interface BeltVisual extends Visual {
@@ -53,6 +53,12 @@ const RARE_TURN = 1.4
 const RARE_PICK_BIAS = 0.5
 const RARE_AXIS = new THREE.Vector3(0.35, 1, 0.2).normalize()
 const GOLD = new THREE.Color(0xffc24a)
+/**
+ * The lucky marble floats above the front edge of the belt and drifts against the flow, so it stands out.
+ * It keeps to the stretch between the stations, plus `beyond` at each end: every screen shape shows that much.
+ */
+const LUCKY = { scale: 1.6, y: 1.15, z: 0.75, bob: 0.22, beyond: 1.2, turn: 2.4, pickPx: 46, trailEvery: 0.07 }
+const GIFT_WORDS: Record<LuckyGift, string> = { coins: '', frenzy: 'Frenzy!', shower: 'Rare shower!', order: 'Order done!', upgrade: 'Free upgrade!' }
 
 /** Repeatable pseudo-random number in [0, 1) from two integers. Keeps the look stable between runs. */
 function noise(n: number, salt: number): number {
@@ -97,6 +103,9 @@ export class LineView {
   private readonly sparks: Sparks
   private readonly fx: LineFx
   private readonly turn = new THREE.Quaternion()
+  private readonly lucky: THREE.Mesh
+  private readonly luckyHalo: THREE.Sprite
+  private luckyTrail = 0
   private travelled = 0
   private clock = 0
 
@@ -118,7 +127,18 @@ export class LineView {
     this.fx = fx
     this.pool = new ItemPool(scene, models, POOL_CAPACITY)
     this.sparks = new Sparks(600, models.glowMap)
-    scene.add(set.group, this.sparks.points)
+    this.lucky = new THREE.Mesh(
+      models.rareGeometry,
+      new THREE.MeshStandardMaterial({ color: 0xffc24a, emissive: 0xff9a1a, emissiveIntensity: 0.7, metalness: 0.7, roughness: 0.22 }),
+    )
+    this.luckyHalo = new THREE.Sprite(
+      new THREE.SpriteMaterial({ map: models.glowMap, color: GOLD.clone().multiplyScalar(1.1), blending: THREE.AdditiveBlending, depthWrite: false, transparent: true }),
+    )
+    this.luckyHalo.scale.setScalar(2.2)
+    this.lucky.add(this.luckyHalo)
+    this.lucky.userData.lucky = true
+    this.lucky.visible = false
+    scene.add(set.group, this.sparks.points, this.lucky)
 
     this.stationJars = config.stations.map((station) => this.makeJar(station.colour, this.stationBase(station.x), 1))
     // A line that resumes with hundreds of jars shows the newest ones, one per shelf place.
@@ -129,11 +149,12 @@ export class LineView {
   handle(events: SimEvent[]): void {
     for (const event of events) {
       if (event.type === 'spawned') this.onSpawned(event.item)
-      else if (event.type === 'sorted') this.onSorted(event.item, event.station, event.slot, event.byHand, event.coins)
+      else if (event.type === 'sorted') this.onSorted(event.item, event.station, event.slot, event.byHand, event.coins, event.chain)
       else if (event.type === 'jarFull') this.onJarFull(event.station, event.shelfIndex, event.coins)
       else if (event.type === 'jarReady') this.onJarReady(event.station)
       else if (event.type === 'caught') this.onCaught(event.item, event.rare, event.byHand, event.coins)
       else if (event.type === 'recycled') this.onRecycled(event.item)
+      else if (event.type === 'luckyCaught') this.onLuckyCaught(event.gift, event.coins)
     }
   }
 
@@ -157,6 +178,44 @@ export class LineView {
       }
       this.write(visual)
     }
+    this.updateLucky(state, dt)
+  }
+
+  /** The lucky marble is on show exactly while the simulation says one is there. */
+  private updateLucky(state: SimState, dt: number): void {
+    const left = state.luckyLeft
+    if (!(left > 0)) {
+      this.lucky.visible = false
+      return
+    }
+    const total = this.config.luckySeconds
+    const along = 1 - left / total
+    const stations = this.config.stations
+    const from = stations[stations.length - 1].x + LUCKY.beyond
+    const to = stations[0].x - LUCKY.beyond
+    this.lucky.visible = true
+    this.lucky.position.set(from + (to - from) * along, LUCKY.y + Math.sin(this.clock * 2.1) * LUCKY.bob, LUCKY.z)
+    // It swells in when it comes and shrinks away when its time is up.
+    const coming = Math.min(1, (total - left) / 0.5)
+    const going = Math.min(1, left / 0.5)
+    this.lucky.scale.setScalar(Math.max(0.001, LUCKY.scale * ease.outBack(coming) * going))
+    this.lucky.rotation.y += LUCKY.turn * dt
+    this.luckyHalo.material.opacity = 0.55 + 0.25 * Math.sin(this.clock * 6)
+    this.luckyTrail += dt
+    if (this.luckyTrail >= LUCKY.trailEvery) {
+      this.luckyTrail = 0
+      this.sparks.burst(this.lucky.position, GOLD, 1, 0.5, 2.6)
+    }
+  }
+
+  /** Whether a screen point is on the lucky marble. */
+  luckyAt(clientX: number, clientY: number, canvas: HTMLCanvasElement): boolean {
+    if (!this.lucky.visible) return false
+    const rect = canvas.getBoundingClientRect()
+    this.projected.copy(this.lucky.position).project(this.camera)
+    const x = rect.left + (this.projected.x * 0.5 + 0.5) * rect.width
+    const y = rect.top + (-this.projected.y * 0.5 + 0.5) * rect.height
+    return Math.hypot(x - clientX, y - clientY) < LUCKY.pickPx
   }
 
   /** Rearranges the shelf for a wide screen or an upright phone. */
@@ -344,7 +403,7 @@ export class LineView {
     })
   }
 
-  private onSorted(item: BeltItem, station: number, slot: number, byHand: boolean, coins: number): void {
+  private onSorted(item: BeltItem, station: number, slot: number, byHand: boolean, coins: number, chain: number): void {
     const visual = this.belt.get(item.id)
     const jar = this.stationJars[station]
     if (!visual) return
@@ -364,7 +423,7 @@ export class LineView {
     const arc = byHand ? 1.3 : 0.55
 
     if (byHand) {
-      if (!this.silent) this.audio.bonus()
+      if (!this.silent) this.audio.bonus(chain)
     } else {
       this.swing(station)
       if (!this.silent) this.audio.snap()
@@ -412,11 +471,14 @@ export class LineView {
     }, {
       delay: 0.46,
       done: () => {
-        if (!this.silent) this.audio.tock()
+        if (!this.silent) {
+          this.audio.tock()
+          this.audio.jar(station)
+        }
         const rim = jar.pos.clone().setY(jar.pos.y + JAR.height)
         if (coins > 0) this.fx.pop(rim, `+${compact(coins)}`, 'coin')
-        this.sparks.burst(rim, GOLD, 10, 1.6, 2.2)
-        this.sparks.burst(rim, colour, 8, 1.3, 2.2)
+        this.sparks.burst(rim, GOLD, 16, 1.9, 2.4)
+        this.sparks.burst(rim, colour, 12, 1.5, 2.4)
         const from = jar.pos.clone()
         this.clearShelfPlace(index)
         this.tweens.add(0.7, (k) => {
@@ -463,6 +525,15 @@ export class LineView {
       visual.scale = size * (1 - 0.5 * k)
       this.write(visual)
     }, { done: () => this.release(visual) })
+  }
+
+  /** The lucky marble bursts where it was, and says what it gave. */
+  private onLuckyCaught(gift: LuckyGift, coins: number): void {
+    const at = this.lucky.position.clone()
+    this.sparks.burst(at, GOLD, 46, 3.6, 5)
+    this.sparks.burst(at, new THREE.Color(0xffffff), 18, 2.2, 4)
+    if (gift === 'coins') this.fx.pop(at, `+${compact(coins)}`, 'rare')
+    else this.fx.pop(at, GIFT_WORDS[gift], 'gift')
   }
 
   /** A caught rare marble lifts off the belt toward the viewer, flares and is gone. */

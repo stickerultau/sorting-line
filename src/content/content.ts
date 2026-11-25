@@ -55,6 +55,17 @@ export const MASTERY_BONUS = 0.02
 export type OrderKind = 'jars' | 'colour' | 'hand' | 'catch'
 export const ORDER_KINDS: OrderKind[] = ['jars', 'colour', 'hand', 'catch']
 
+/** What a caught lucky marble can give. */
+export type LuckyGift = 'coins' | 'frenzy' | 'shower' | 'order' | 'upgrade'
+/** How often each gift is given, relative to the others. */
+export const LUCKY_GIFTS: { gift: LuckyGift; weight: number }[] = [
+  { gift: 'coins', weight: 40 },
+  { gift: 'frenzy', weight: 25 },
+  { gift: 'shower', weight: 15 },
+  { gift: 'order', weight: 15 },
+  { gift: 'upgrade', weight: 5 },
+]
+
 export type UpgradeId = 'belt' | 'feeder' | 'lids' | 'luck' | 'spotter' | 'orders' | 'rush'
 
 export interface Upgrade {
@@ -118,6 +129,28 @@ export interface SimConfig {
   starCoins: number
   /** Lasting share of extra coins for each star. */
   starBonus: number
+  /** Seconds of play before a new line's first lucky marble. */
+  luckyFirst: number
+  /** The shortest and longest wait for the next lucky marble, in seconds. */
+  luckyEvery: [number, number]
+  /** Seconds a lucky marble stays to be caught. */
+  luckySeconds: number
+  /** A gift of coins is worth this many seconds of the line's steady earnings. */
+  luckyCoinSeconds: number
+  /** Rare marbles in a shower. */
+  luckyShower: number
+  /** Seconds a frenzy lasts. */
+  frenzySeconds: number
+  /** Coins are multiplied by this during a frenzy. */
+  frenzyPay: number
+  /** Seconds after a hand sort in which the next one still continues the chain. */
+  chainSeconds: number
+  /** Share added to the hand tip by each hand sort in a chain after the first. */
+  chainStep: number
+  /** Hand sorts after the first that still add to the tip. */
+  chainTop: number
+  /** From this length on, each hand sort in a chain fills the rush meter twice. */
+  chainRushAt: number
 }
 
 export const DEFAULT_CONFIG: SimConfig = {
@@ -146,4 +179,15 @@ export const DEFAULT_CONFIG: SimConfig = {
   rushPay: 3,
   starCoins: 10_000,
   starBonus: 0.15,
+  luckyFirst: 90,
+  luckyEvery: [120, 240],
+  luckySeconds: 12,
+  luckyCoinSeconds: 180,
+  luckyShower: 5,
+  frenzySeconds: 30,
+  frenzyPay: 5,
+  chainSeconds: 1.5,
+  chainStep: 0.1,
+  chainTop: 40,
+  chainRushAt: 10,
 }

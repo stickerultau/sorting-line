@@ -50,7 +50,7 @@ describe('sorting, jars and swapping', () => {
     s.items.push(redMarble(99, 5.9))
     const events = tick(s, 0.25)
     expect(events).toEqual([
-      { type: 'sorted', item: expect.objectContaining({ id: 99 }), station: 0, slot: 0, byHand: false, coins: 0 },
+      { type: 'sorted', item: expect.objectContaining({ id: 99 }), station: 0, slot: 0, byHand: false, coins: 0, chain: 0 },
     ])
     expect(s.items).toHaveLength(0)
     expect(s.stations[0].count).toBe(1)
@@ -111,7 +111,7 @@ describe('recycling, hand flick and invariants', () => {
     const s = createSim(QUIET, 1)
     s.items.push(redMarble(99, 2))
     expect(flick(s, 99)).toEqual([
-      { type: 'sorted', item: expect.objectContaining({ id: 99 }), station: 0, slot: 0, byHand: true, coins: 1 },
+      { type: 'sorted', item: expect.objectContaining({ id: 99 }), station: 0, slot: 0, byHand: true, coins: 1, chain: 1 },
     ])
     expect(s.items).toHaveLength(0)
     expect(s.stations[0].count).toBe(1)

@@ -1,8 +1,8 @@
 import * as THREE from 'three'
 import './style.css'
-import { DEFAULT_CONFIG, MASTERY_BONUS, MASTERY_NAME, RARES, TIER_NAME } from './content/content'
+import { DEFAULT_CONFIG, MASTERY_BONUS, MASTERY_NAME, RARES, TIER_NAME, UPGRADES } from './content/content'
 import { parseSave, payAway, resume, toSave, type Away, type SaveData } from './sim/save'
-import { MAX_DT, buy, claimOrder, flick, masteryRank, prestige, tick } from './sim/sim'
+import { MAX_DT, buy, catchLucky, claimOrder, flick, masteryRank, prestige, tick } from './sim/sim'
 import { warmUp } from './sim/warmup'
 import type { SimEvent } from './sim/types'
 import { createHud } from './ui/hud'
@@ -17,6 +17,9 @@ const SAVE_KEY = 'sorting-line-save-v1'
 const SAVE_EVERY_MS = 10_000
 /** With no frame drawn for this long the line is standing still, in a background tab or a sleeping computer. */
 const STALLED_MS = 3_000
+/** A legendary marble caught by hand slows the line for a moment: this long, at this share of full speed. */
+const SLOW_SECONDS = 0.55
+const SLOW_RATE = 0.3
 /** The times of day the button steps through. `null` follows the clock on this device. */
 const TIMES: { label: string; hour: number | null }[] = [
   { label: 'Clock', hour: null },
@@ -27,6 +30,8 @@ const TIMES: { label: string; hour: number | null }[] = [
 ]
 
 const params = new URLSearchParams(location.search)
+/** People who ask their device for less motion get no slow motion or flashes. */
+const calm = window.matchMedia('(prefers-reduced-motion: reduce)').matches
 /**
  * `?fresh` plays without reading or writing a save. So does `?seed`: a line that deals the same items
  * every time is for tests and clips, and must not be a way to collect the same rare marble again and again.
@@ -85,6 +90,13 @@ let followClock = Number.isNaN(fixedHour)
 stage.setHour(followClock ? clockHour() : fixedHour, true)
 
 let soundOn = true
+/** Seconds of slow motion still to run. */
+let slowLeft = 0
+/** A short buzz on phones that can. It follows the sound switch: a player who wants quiet wants this off too. */
+const buzz = (ms: number) => {
+  // Browsers refuse a buzz before the first real tap, and say so in the console.
+  if (soundOn && 'vibrate' in navigator && navigator.userActivation?.hasBeenActive) navigator.vibrate(ms)
+}
 const qualityLabel = (quality: Quality) => (quality === 'high' ? 'Detail: high' : 'Detail: low')
 const hud = createHud(
   document.getElementById('hud')!,
@@ -169,6 +181,16 @@ warmUp(state, WARM_UP_SECONDS, 1 / 32, (events) => {
 })
 view.silent = false
 
+/** What a caught lucky marble gave, for the notice. */
+function giftWords(event: Extract<SimEvent, { type: 'luckyCaught' }>): string {
+  const { config } = state
+  if (event.gift === 'coins') return `A burst of coins: +${compact(event.coins)}`
+  if (event.gift === 'frenzy') return `Frenzy! Everything pays ×${config.frenzyPay} for ${config.frenzySeconds} seconds`
+  if (event.gift === 'shower') return `${config.luckyShower} rare marbles are coming down the belt`
+  if (event.gift === 'order') return 'One of your orders is finished. Claim it'
+  return `A free level of ${UPGRADES.find((upgrade) => upgrade.id === event.upgrade)?.name ?? 'an upgrade'}`
+}
+
 function apply(events: SimEvent[]): void {
   view.handle(events)
   for (const event of events) {
@@ -176,9 +198,26 @@ function apply(events: SimEvent[]): void {
     else if (event.type === 'rushStarted') {
       audio.rush()
       hud.toast('Rush!', `Jars, tips and marbles pay ×${state.config.rushPay} for ${event.seconds} seconds`)
+    } else if (event.type === 'luckyArrived') {
+      audio.lucky()
+      // Until the first one is caught, say what it is.
+      if (state.luckyCaught === 0) hud.toast('A lucky marble!', 'Click it before it drifts away. It always brings a gift.', undefined, 'lucky')
+    } else if (event.type === 'luckyCaught') {
+      audio.gift()
+      buzz(40)
+      hud.toast('Lucky marble', giftWords(event), undefined, 'lucky')
+      save()
     }
     if (event.type !== 'caught') continue
     const kind = RARES.find((rare) => rare.id === event.rare)!
+    if (event.byHand) {
+      buzz(25)
+      // A legendary marble caught by hand gets its moment.
+      if (kind.tier === 3 && !calm) {
+        slowLeft = SLOW_SECONDS
+        hud.flash()
+      }
+    }
     const how = event.byHand ? 'Caught by hand' : 'Caught by the spotter arm'
     // A catch that reaches a new rank says so, and what the rank is worth.
     const owned = state.collection[event.rare] ?? 0
@@ -225,6 +264,10 @@ if (params.has('fps')) {
 canvas.addEventListener('pointerdown', (event) => {
   if (event.button !== 0) return
   audio.unlock()
+  if (view.luckyAt(event.clientX, event.clientY, canvas)) {
+    apply(catchLucky(state))
+    return
+  }
   const id = view.itemAt(event.clientX, event.clientY, canvas)
   if (id === null) return
   const events = flick(state, id)
@@ -260,12 +303,15 @@ function frame(now: number): void {
   }
   quiet -= dt
   if (dt > 0) {
-    apply(tick(state, dt))
-    view.update(state, dt)
+    // The line and everything on it slow down together; the overlay keeps its own time.
+    const lineDt = slowLeft > 0 ? dt * SLOW_RATE : dt
+    slowLeft = Math.max(0, slowLeft - dt)
+    apply(tick(state, lineDt))
+    view.update(state, lineDt)
     hud.update(state, dt)
   }
   if (followClock) stage.setHour(clockHour())
-  // The lamp strip under the shelf comes on for a rush, whatever the hour.
-  lineSet.setLamp(Math.max(stage.render(dt).lamp, state.rushLeft > 0 ? 1 : 0))
+  // The lamp strip under the shelf comes on for a rush or a frenzy, whatever the hour.
+  lineSet.setLamp(Math.max(stage.render(dt).lamp, state.rushLeft > 0 || state.frenzyLeft > 0 ? 1 : 0))
 }
 requestAnimationFrame(frame)

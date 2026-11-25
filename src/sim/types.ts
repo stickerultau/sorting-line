@@ -1,4 +1,4 @@
-import type { ColourId, FamilyId, OrderKind, RareId, SimConfig, UpgradeId } from '../content/content'
+import type { ColourId, FamilyId, LuckyGift, OrderKind, RareId, SimConfig, UpgradeId } from '../content/content'
 
 export interface ItemKind {
   family: FamilyId
@@ -68,11 +68,29 @@ export interface SimState {
   rushCharge: number
   /** Seconds of rush left. 0 means no rush. */
   rushLeft: number
+  /** Seconds until the next lucky marble comes. Stands still while one is on show. */
+  luckyIn: number
+  /** Seconds the lucky marble on show will stay. 0 means none is there. */
+  luckyLeft: number
+  /** Lucky marbles have their own stream of numbers too. */
+  luckyRng: number
+  /** Lucky marbles ever caught. */
+  luckyCaught: number
+  /** Seconds of frenzy left. 0 means no frenzy. */
+  frenzyLeft: number
+  /** Hand sorts in the chain that is running. 0 means none. */
+  chain: number
+  /** Seconds until the running chain ends unless another hand sort comes. */
+  chainLeft: number
+  /** The longest chain ever. */
+  bestChain: number
+  /** New items dealt since the last rare marble. A long dry spell raises the chance of the next one. */
+  sinceRare: number
 }
 
 export type SimEvent =
   | { type: 'spawned'; item: BeltItem }
-  | { type: 'sorted'; item: BeltItem; station: number; slot: number; byHand: boolean; coins: number }
+  | { type: 'sorted'; item: BeltItem; station: number; slot: number; byHand: boolean; coins: number; /** The length of the hand chain this is part of. 0 for a flipper. */ chain: number }
   | { type: 'jarFull'; station: number; shelfIndex: number; coins: number }
   | { type: 'caught'; item: BeltItem; rare: RareId; byHand: boolean; coins: number; first: boolean }
   | { type: 'jarReady'; station: number }
@@ -80,3 +98,10 @@ export type SimEvent =
   | { type: 'orderReady'; slot: number }
   | { type: 'rushStarted'; seconds: number }
   | { type: 'rushEnded' }
+  | { type: 'luckyArrived'; seconds: number }
+  /** It left without being caught. */
+  | { type: 'luckyGone' }
+  /** `coins` is what a gift of coins paid, `slot` the order a gift finished, `upgrade` the level a gift added. */
+  | { type: 'luckyCaught'; gift: LuckyGift; coins: number; slot?: number; upgrade?: UpgradeId }
+  | { type: 'frenzyEnded' }
+  | { type: 'chainEnded'; length: number }

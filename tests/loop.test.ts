@@ -149,6 +149,7 @@ describe('rush', () => {
     const state = createSim(FAST, 1)
     const calm = rareChance({ ...state, config: { ...FAST, rareChance: 0.01 } })
     for (let i = 0; i < 3; i++) sortByHand(state, 'blue')
+    for (let t = 0; t < FAST.chainSeconds; t += 0.25) tick(state, 0.25) // let the chain end: this is about the rush alone
     expect(ofType(sortByHand(state), 'sorted')[0].coins).toBe(FAST.handTip * FAST.rushPay)
     expect(ofType(catchByHand(state, 'oxblood'), 'caught')[0].coins).toBe(90 * 2 * FAST.rushPay)
     expect(rareChance({ ...state, config: { ...FAST, rareChance: 0.01 } })).toBeCloseTo(calm * 2)

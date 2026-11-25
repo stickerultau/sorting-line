@@ -20,6 +20,13 @@ export interface SaveData {
   rushCharge: number
   /** Seconds of a rush still to run. */
   rushLeft: number
+  /** Seconds until the next lucky marble. Null in a save from before there were any. */
+  luckyIn: number | null
+  luckyCaught: number
+  /** Seconds of a frenzy still to run. */
+  frenzyLeft: number
+  bestChain: number
+  sinceRare: number
 }
 
 export interface Away {
@@ -47,6 +54,11 @@ export function toSave(state: SimState, now: number): SaveData {
     orders: state.orders.map((order) => ({ ...order })),
     rushCharge: state.rushCharge,
     rushLeft: state.rushLeft,
+    luckyIn: state.luckyIn,
+    luckyCaught: state.luckyCaught,
+    frenzyLeft: state.frenzyLeft,
+    bestChain: state.bestChain,
+    sinceRare: state.sinceRare,
   }
 }
 
@@ -56,6 +68,11 @@ const MAX_COUNT = 1e15
 /** A whole number from 0 to `max`. Anything else stored there becomes 0. */
 function count(value: unknown, max = MAX_COUNT): number {
   return typeof value === 'number' && value > 0 ? Math.min(Math.floor(value), max) : 0
+}
+
+/** Seconds from 0 up. Anything else stored there becomes 0. */
+function seconds(value: unknown): number {
+  return typeof value === 'number' && value > 0 ? Math.min(value, MAX_COUNT) : 0
 }
 
 /** Reads the orders in a save. One that makes no sense spoils the lot: the line deals new ones instead. */
@@ -105,7 +122,12 @@ export function parseSave(raw: unknown): SaveData | null {
     ordersDone: count(data.ordersDone),
     orders: parseOrders(data.orders),
     rushCharge: count(data.rushCharge),
-    rushLeft: typeof data.rushLeft === 'number' && data.rushLeft > 0 ? Math.min(data.rushLeft, MAX_COUNT) : 0,
+    rushLeft: seconds(data.rushLeft),
+    luckyIn: typeof data.luckyIn === 'number' ? seconds(data.luckyIn) : null,
+    luckyCaught: count(data.luckyCaught),
+    frenzyLeft: seconds(data.frenzyLeft),
+    bestChain: count(data.bestChain),
+    sinceRare: count(data.sinceRare),
     shelved: count(data.shelved),
     sorted: count(data.sorted),
     upgrades,
@@ -154,6 +176,11 @@ export function resume(config: SimConfig, seed: number, data: SaveData | null, n
   state.ordersDone = data.ordersDone
   state.rushCharge = Math.min(data.rushCharge, config.rushHits - 1)
   state.rushLeft = Math.min(data.rushLeft, rushSeconds(state))
+  state.luckyIn = data.luckyIn === null ? config.luckyFirst : Math.min(data.luckyIn, config.luckyEvery[1])
+  state.luckyCaught = data.luckyCaught
+  state.frenzyLeft = Math.min(data.frenzyLeft, config.frenzySeconds)
+  state.bestChain = data.bestChain
+  state.sinceRare = data.sinceRare
   if (data.orders?.length === config.orderSlots) state.orders = data.orders.map((order) => ({ ...order }))
 
   const away = payAway(state, Math.floor((now - data.savedAt) / 1000))

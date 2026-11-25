@@ -8,7 +8,10 @@ export interface LineAudio {
   clink(family: FamilyId, fill: number): void
   snap(): void
   tock(): void
-  bonus(): void
+  /** An item sorted by hand. The pitch climbs with the length of the chain it is part of. */
+  bonus(chain?: number): void
+  /** A full jar leaves its station. Each station has its own note. */
+  jar(station: number): void
   /** A rare marble caught. Higher tiers ring longer. */
   rare(tier: number): void
   buy(): void
@@ -18,6 +21,10 @@ export interface LineAudio {
   rush(): void
   /** A new workshop opens. */
   star(): void
+  /** A lucky marble arrives. */
+  lucky(): void
+  /** A lucky marble is caught and gives its gift. */
+  gift(): void
 }
 
 /** Synthesized placeholder sounds. Final foley comes later, per the development plan. */
@@ -90,9 +97,17 @@ export function createAudio(): LineAudio {
       tone(480, 0.07, 0.18, 'triangle')
       noise(0.02, 0.2, 900)
     },
-    bonus() {
-      tone(1320, 0.1, 0.16, 'sine')
-      tone(1760, 0.16, 0.16, 'sine', undefined, 0.07)
+    bonus(chain = 1) {
+      // One octave up over the first 25 sorts of a chain.
+      const up = 2 ** (Math.min(Math.max(chain, 1) - 1, 24) / 24)
+      tone(1320 * up, 0.1, 0.16, 'sine')
+      tone(1760 * up, 0.16, 0.16, 'sine', undefined, 0.07)
+    },
+    jar(station) {
+      const notes = [523.3, 659.3, 784, 987.8, 1174.7]
+      const note = notes[station % notes.length]
+      tone(note, 0.5, 0.07, 'sine', undefined, 0.03)
+      tone(note * 2, 0.3, 0.03, 'triangle', undefined, 0.05)
     },
     rare(tier) {
       const notes = [880, 1108.7, 1318.5, 1760, 2217.5, 2637]
@@ -114,6 +129,15 @@ export function createAudio(): LineAudio {
       const notes = [392, 523.3, 659.3, 784, 1046.5]
       notes.forEach((note, i) => tone(note, 0.22, 0.18, 'triangle', undefined, i * 0.06))
       noise(0.25, 0.08, 5200)
+    },
+    lucky() {
+      const notes = [1568, 2093, 2637, 3136]
+      notes.forEach((note, i) => tone(note, 0.35, 0.09, 'sine', undefined, i * 0.09))
+    },
+    gift() {
+      const notes = [784, 987.8, 1174.7, 1568, 1975.5]
+      notes.forEach((note, i) => tone(note, 0.45, 0.15, 'triangle', undefined, i * 0.05))
+      noise(0.3, 0.07, 6000)
     },
     star() {
       const notes = [523.3, 659.3, 784, 1046.5, 1318.5, 1568]

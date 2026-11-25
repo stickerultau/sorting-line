@@ -1,4 +1,4 @@
-import { MASTERY_AT, MASTERY_BONUS, ORDER_KINDS, RARES, TIER_WEIGHT, UPGRADES, type ColourId, type OrderKind, type RareId, type SimConfig, type UpgradeId } from '../content/content'
+import { LUCKY_GIFTS, MASTERY_AT, MASTERY_BONUS, ORDER_KINDS, RARES, TIER_WEIGHT, UPGRADES, type ColourId, type LuckyGift, type OrderKind, type RareId, type SimConfig, type UpgradeId } from '../content/content'
 import { nextRandom } from './rng'
 import type { BeltItem, ItemKind, Order, SimEvent, SimState } from './types'
 
@@ -14,6 +14,17 @@ const ORDER_SEED = 0x5bd1e995
 const RUSH_HITS_FOR_RARE = 5
 /** Rare marbles turn up this many times as often during a rush. */
 const RUSH_RARE = 2
+/** Mixed into the seed for the stream of numbers that lucky marbles are drawn from. */
+const LUCKY_SEED = 0x2545f491
+const LUCKY_WEIGHT_TOTAL = LUCKY_GIFTS.reduce((sum, entry) => sum + entry.weight, 0)
+/**
+ * A dry spell is counted in usual waits: the number of items it takes, on average, for a rare marble to come.
+ * After this many with none, the chance starts to climb; at the second figure the next item is a rare marble.
+ */
+const DRY_FROM = 2
+const DRY_TO = 3
+/** A new player's first orders are short, so the first reward comes early. */
+const STARTER_ORDERS = 3
 
 const noUpgrades = () => Object.fromEntries(UPGRADES.map((upgrade) => [upgrade.id, 0])) as Record<UpgradeId, number>
 
@@ -41,6 +52,15 @@ export function createSim(config: SimConfig, seed: number): SimState {
     orderRng: (seed ^ ORDER_SEED) | 0,
     rushCharge: 0,
     rushLeft: 0,
+    luckyIn: config.luckyFirst,
+    luckyLeft: 0,
+    luckyRng: (seed ^ LUCKY_SEED) | 0,
+    luckyCaught: 0,
+    frenzyLeft: 0,
+    chain: 0,
+    chainLeft: 0,
+    bestChain: 0,
+    sinceRare: 0,
   }
   dealOrders(state)
   return state
@@ -54,6 +74,19 @@ export const jarValue = (state: SimState) => Math.round(state.config.jarCoins * 
 export const rareChance = (state: SimState) =>
   state.config.rareChance * (1 + 0.15 * state.upgrades.luck) * (state.rushLeft > 0 ? RUSH_RARE : 1)
 export const rushSeconds = (state: SimState) => state.config.rushSeconds + 2 * state.upgrades.rush
+
+/** The chance that the next new item is a rare marble: the usual chance, climbing once a dry spell has gone on too long. */
+export function rareChanceNow(state: SimState): number {
+  const usual = rareChance(state)
+  if (usual <= 0) return 0
+  const waits = state.sinceRare * usual
+  if (waits <= DRY_FROM) return usual
+  return Math.min(1, usual + ((1 - usual) * (waits - DRY_FROM)) / (DRY_TO - DRY_FROM))
+}
+
+/** What the hand tip is multiplied by at this point in a chain: 1 for the first sort, more for each one after. */
+export const chainTip = (state: SimState) =>
+  1 + state.config.chainStep * Math.min(Math.max(state.chain - 1, 0), state.config.chainTop)
 
 /** The rank of a marble caught this many times: 0 not found, then found, bronze, silver, gold. */
 export function masteryRank(caught: number): number {
@@ -71,10 +104,13 @@ export function collectionBonus(state: SimState): number {
 
 /** What stars and the collection multiply every payment by. It only ever grows. */
 export const steadyMultiplier = (state: SimState) => (1 + state.stars * state.config.starBonus) * (1 + collectionBonus(state))
-/** The same, with the rush on top while one is running. */
-export const coinMultiplier = (state: SimState) => steadyMultiplier(state) * (state.rushLeft > 0 ? state.config.rushPay : 1)
+/** The same, with a rush and a frenzy on top while they are running. */
+export const coinMultiplier = (state: SimState) =>
+  steadyMultiplier(state) * (state.rushLeft > 0 ? state.config.rushPay : 1) * (state.frenzyLeft > 0 ? state.config.frenzyPay : 1)
 /** Coins for a full jar outside a rush. Time away is paid at this price. */
 export const steadyJarPay = (state: SimState) => Math.round(state.config.jarCoins * (lidFactor(state) * steadyMultiplier(state)))
+/** Coins a second from full jars when the line runs without a hitch and nobody helps. */
+export const steadyIncome = (state: SimState) => steadyJarPay(state) / (feedInterval(state) * state.config.jarCapacity)
 
 /** Coins an order pays when it is claimed. It follows the price of a jar, so an old order is never worth less. */
 export const orderReward = (state: SimState, order: Order) =>
@@ -158,7 +194,7 @@ function newOrder(state: SimState, others: Order[]): Order {
   const { config } = state
   const open = ORDER_KINDS.filter((kind) => !others.some((order) => order.kind === kind) && (kind !== 'catch' || config.rareChance > 0))
   const kind = open[Math.floor(orderRandom(state) * open.length)] ?? 'jars'
-  const minutes = 1.5 + orderRandom(state) * 2
+  const minutes = state.ordersDone < STARTER_ORDERS ? 0.6 + orderRandom(state) * 0.6 : 1.5 + orderRandom(state) * 2
   const jarsPerMinute = 60 / feedInterval(state) / config.jarCapacity
   if (kind === 'jars') {
     const need = Math.max(5, Math.round((jarsPerMinute * minutes) / 5) * 5)
@@ -197,6 +233,83 @@ export function claimOrder(state: SimState, slot: number): number | null {
   return coins
 }
 
+// The lucky marble.
+
+function luckyRandom(state: SimState): number {
+  const stream = { rng: state.luckyRng }
+  const value = nextRandom(stream)
+  state.luckyRng = stream.rng
+  return value
+}
+
+function scheduleLucky(state: SimState): void {
+  const [least, most] = state.config.luckyEvery
+  state.luckyLeft = 0
+  state.luckyIn = least + luckyRandom(state) * (most - least)
+}
+
+/** A click on the lucky marble: one gift, drawn by weight. Does nothing if no lucky marble is there. */
+export function catchLucky(state: SimState): SimEvent[] {
+  const events: SimEvent[] = []
+  if (!(state.luckyLeft > 0)) return events
+  let roll = luckyRandom(state) * LUCKY_WEIGHT_TOTAL
+  const drawn = LUCKY_GIFTS.find((entry) => (roll -= entry.weight) < 0) ?? LUCKY_GIFTS[0]
+  state.luckyCaught++
+  scheduleLucky(state)
+  giveLucky(state, drawn.gift, events)
+  return events
+}
+
+/** Hands over one gift. A gift that has nothing to act on turns into coins. */
+export function giveLucky(state: SimState, gift: LuckyGift, events: SimEvent[]): void {
+  const { config } = state
+  if (gift === 'frenzy') {
+    state.frenzyLeft = config.frenzySeconds
+    events.push({ type: 'luckyCaught', gift, coins: 0 })
+    return
+  }
+  if (gift === 'shower') {
+    const rares: ItemKind[] = []
+    for (let n = 0; n < config.luckyShower; n++) {
+      rares.push({ family: 'marble', colour: config.stations[0].colour, rare: pickRare(luckyRandom(state)) })
+    }
+    state.recycle.unshift(...rares)
+    events.push({ type: 'luckyCaught', gift, coins: 0 })
+    return
+  }
+  if (gift === 'order') {
+    // The order with the largest share still to do.
+    let slot = -1
+    state.orders.forEach((order, index) => {
+      if (order.have >= order.need) return
+      if (slot < 0 || order.have / order.need < state.orders[slot].have / state.orders[slot].need) slot = index
+    })
+    if (slot >= 0) {
+      state.orders[slot].have = state.orders[slot].need
+      events.push({ type: 'orderReady', slot }, { type: 'luckyCaught', gift, coins: 0, slot })
+      return
+    }
+  }
+  if (gift === 'upgrade') {
+    const open = UPGRADES.filter((upgrade) => state.upgrades[upgrade.id] < upgrade.maxLevel)
+    const upgrade = open[Math.floor(luckyRandom(state) * open.length)]
+    if (upgrade) {
+      state.upgrades[upgrade.id]++
+      events.push({ type: 'luckyCaught', gift, coins: 0, upgrade: upgrade.id })
+      return
+    }
+  }
+  const coins = pay(state, Math.round(steadyIncome(state) * config.luckyCoinSeconds))
+  events.push({ type: 'luckyCaught', gift: 'coins', coins })
+}
+
+/** One more hand sort in the chain. */
+function extendChain(state: SimState): void {
+  state.chain++
+  state.chainLeft = state.config.chainSeconds
+  if (state.chain > state.bestChain) state.bestChain = state.chain
+}
+
 /** Hand work fills the rush meter. When it is full the rush starts by itself. */
 function chargeRush(state: SimState, hits: number, events: SimEvent[]): void {
   if (state.rushLeft > 0) return
@@ -212,6 +325,31 @@ function step(state: SimState, events: SimEvent[]): void {
   if (state.rushLeft > 0) {
     state.rushLeft = Math.max(0, state.rushLeft - STEP)
     if (state.rushLeft === 0) events.push({ type: 'rushEnded' })
+  }
+  if (state.frenzyLeft > 0) {
+    state.frenzyLeft = Math.max(0, state.frenzyLeft - STEP)
+    if (state.frenzyLeft === 0) events.push({ type: 'frenzyEnded' })
+  }
+  if (state.chainLeft > 0) {
+    state.chainLeft = Math.max(0, state.chainLeft - STEP)
+    if (state.chainLeft === 0) {
+      events.push({ type: 'chainEnded', length: state.chain })
+      state.chain = 0
+    }
+  }
+  if (state.luckyLeft > 0) {
+    state.luckyLeft = Math.max(0, state.luckyLeft - STEP)
+    if (state.luckyLeft === 0) {
+      scheduleLucky(state)
+      events.push({ type: 'luckyGone' })
+    }
+  } else {
+    state.luckyIn -= STEP
+    if (state.luckyIn <= 0) {
+      state.luckyIn = 0
+      state.luckyLeft = config.luckySeconds
+      events.push({ type: 'luckyArrived', seconds: config.luckySeconds })
+    }
   }
   for (let i = 0; i < state.stations.length; i++) {
     const station = state.stations[i]
@@ -247,8 +385,8 @@ function placeInJar(state: SimState, item: BeltItem, index: number, byHand: bool
   const station = state.stations[index]
   const { config } = state
   const price = lidFactor(state) * coinMultiplier(state)
-  const tip = byHand ? pay(state, Math.round(config.handTip * price)) : 0
-  events.push({ type: 'sorted', item, station: index, slot: station.count, byHand, coins: tip })
+  const tip = byHand ? pay(state, Math.round(config.handTip * price * chainTip(state))) : 0
+  events.push({ type: 'sorted', item, station: index, slot: station.count, byHand, coins: tip, chain: byHand ? state.chain : 0 })
   station.count++
   state.sorted++
   if (byHand) countTowardOrders(state, 'hand', undefined, 1, events)
@@ -289,18 +427,21 @@ function newKind(state: SimState): ItemKind {
   const { families, stations, maxRares } = state.config
   state.created++
   // The recycle queue is empty whenever a new kind is made, so every rare marble in play is on the belt.
-  const chance = rareChance(state)
+  const chance = rareChanceNow(state)
   if (chance > 0 && state.items.filter((item) => item.rare).length < maxRares && nextRandom(state) < chance) {
-    return { family: 'marble', colour: stations[0].colour, rare: pickRare(state) }
+    state.sinceRare = 0
+    return { family: 'marble', colour: stations[0].colour, rare: pickRare(nextRandom(state)) }
   }
+  if (chance > 0) state.sinceRare++
   return {
     family: families[Math.floor(nextRandom(state) * families.length)],
     colour: stations[Math.floor(nextRandom(state) * stations.length)].colour,
   }
 }
 
-function pickRare(state: SimState): RareId {
-  let roll = nextRandom(state) * RARE_WEIGHT_TOTAL
+/** The rare marble for a number from 0 to 1: the commoner tiers take more of that range. */
+function pickRare(random: number): RareId {
+  let roll = random * RARE_WEIGHT_TOTAL
   for (const rare of RARES) {
     roll -= TIER_WEIGHT[rare.tier]
     if (roll < 0) return rare.id
@@ -319,6 +460,7 @@ export function flick(state: SimState, itemId: number): SimEvent[] {
   const item = state.items[at]
   if (item.rare) {
     state.items.splice(at, 1)
+    extendChain(state)
     catchRare(state, item, item.rare, true, events)
     chargeRush(state, RUSH_HITS_FOR_RARE, events)
     return events
@@ -326,7 +468,8 @@ export function flick(state: SimState, itemId: number): SimEvent[] {
   const station = state.stations.findIndex((s) => s.colour === item.colour && s.swapLeft === 0)
   if (station < 0) return events
   state.items.splice(at, 1)
+  extendChain(state)
   placeInJar(state, item, station, true, events)
-  chargeRush(state, 1, events)
+  chargeRush(state, state.chain >= state.config.chainRushAt ? 2 : 1, events)
   return events
 }

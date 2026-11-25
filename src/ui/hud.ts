@@ -1,18 +1,22 @@
 import { COLOUR_HEX, MASTERY_AT, MASTERY_NAME, RARES, TIER_NAME, UPGRADES, type RareKind, type UpgradeId } from '../content/content'
-import { collectionBonus, masteryRank, nextStarAt, orderReward, rushSeconds, starsWaiting, upgradeCost } from '../sim/sim'
+import { nextGoal, type Goal } from '../sim/goal'
+import { chainTip, collectionBonus, masteryRank, nextStarAt, orderReward, rushSeconds, starsWaiting, steadyIncome, upgradeCost } from '../sim/sim'
 import type { Order, SimState } from '../sim/types'
 import { compact } from '../view/format'
 import { paintMarble } from '../view/marbleArt'
 
-export type PopTone = 'coin' | 'tip' | 'rare'
+/** 'coin' and 'rare' send coins flying to the wallet as well; 'gift' is a word, not an amount. */
+export type PopTone = 'coin' | 'tip' | 'rare' | 'gift'
 
 export interface Hud {
   /** Call every frame. Only touches the page when something it shows has changed. */
   update(state: SimState, dt: number): void
   /** A number that floats up from a point on the screen and fades. */
   pop(x: number, y: number, text: string, tone: PopTone): void
-  /** A short notice at the top. `kind` adds a picture of that marble. */
-  toast(title: string, body: string, kind?: RareKind): void
+  /** A short notice at the top. `kind` adds a picture of that marble; 'lucky' gives it a gold edge. */
+  toast(title: string, body: string, kind?: RareKind, tone?: 'lucky'): void
+  /** A short flash of light over the whole screen, for the rarest moments. */
+  flash(): void
   /** Forgets recent earnings, so a lump sum such as pay for time away does not show as coins a minute. */
   settle(): void
 }
@@ -46,6 +50,10 @@ const RATE_WINDOW = 30
 const SHOW_TOP_LEVEL_TO = 20
 /** A second click sooner than this after the first is the same double-click, not a confirmation. */
 const CONFIRM_AFTER_MS = 500
+/** A chain shows on screen from this length. */
+const SHOW_CHAIN_FROM = 3
+/** Coins in flight to the wallet at once. */
+const MAX_FLYING = 14
 const percent = (share: number) => `+${Math.round(share * 100)}%`
 const capital = (word: string) => word[0].toUpperCase() + word.slice(1)
 
@@ -57,10 +65,26 @@ function orderWords(order: Order): { full: string; short: string } {
   return { full: order.need === 1 ? 'Catch a rare marble' : `Catch ${order.need} rare marbles`, short: 'Catch' }
 }
 
+/** A wait in words. It is an estimate, so it is rounded the way a person would say it. */
+function about(seconds: number): string {
+  if (seconds < 20) return `${Math.max(1, Math.ceil(seconds))} s`
+  if (seconds < 90) return `${Math.ceil(seconds / 5) * 5} s`
+  if (seconds < 5400) return `${Math.round(seconds / 60)} min`
+  return `${(seconds / 3600).toFixed(1)} h`
+}
+
+function goalWords(goal: Goal): string {
+  if (goal.kind === 'upgrade') return `${UPGRADES.find((upgrade) => upgrade.id === goal.id)!.name} in ${about(goal.seconds)}`
+  if (goal.kind === 'order') return `An order finished in ${about(goal.seconds)}`
+  if (goal.kind === 'star') return `A star in ${about(goal.seconds)}`
+  return `${MASTERY_NAME[goal.rank]} ${RARES.find((rare) => rare.id === goal.rare)!.name}: ${goal.more} more`
+}
+
 /** The overlay: coins, orders, the rush meter, the upgrade shop, the marble collection and a few controls. Press H to hide it for recording. */
 export function createHud(root: HTMLElement, actions: HudActions, labels: HudLabels): Hud {
   root.innerHTML = `
     <div class="rush-glow" aria-hidden="true"></div>
+    <div class="flash" id="hud-flash" aria-hidden="true"></div>
     <header class="bar">
       <div class="wallet" aria-live="off">
         <span class="coin" aria-hidden="true"></span>
@@ -85,6 +109,10 @@ export function createHud(root: HTMLElement, actions: HudActions, labels: HudLab
     <section class="orders" aria-label="Orders">
       <h2>Orders <span id="hud-orders-done"></span></h2>
       <div class="order-list" id="hud-order-list"></div>
+      <div class="goal-row">
+        <p class="goal" id="hud-goal" hidden><b>Next</b><span></span></p>
+        <p class="frenzy-chip" id="hud-frenzy" hidden></p>
+      </div>
     </section>
     <aside class="panel" id="hud-upgrades" hidden>
       <h2>Upgrades</h2>
@@ -107,6 +135,8 @@ export function createHud(root: HTMLElement, actions: HudActions, labels: HudLab
     </aside>
     <div class="toasts" id="hud-toasts" role="status"></div>
     <div class="pops" id="hud-pops" aria-hidden="true"></div>
+    <div class="pops" id="hud-flights" aria-hidden="true"></div>
+    <div class="chain" id="hud-chain" aria-hidden="true" hidden><b></b><span></span></div>
     <p class="hint" id="hud-hint">Click a glowing marble to catch it. Click anything else on the belt to sort it by hand and fill the rush meter. Press H to hide this.</p>`
 
   const find = <T extends HTMLElement>(id: string) => root.querySelector<T>(`#${id}`)!
@@ -129,9 +159,50 @@ export function createHud(root: HTMLElement, actions: HudActions, labels: HudLab
   const starNext = find('hud-star-next')
   const prestige = find<HTMLButtonElement>('hud-prestige')
   const bonus = find('hud-bonus')
+  const frenzy = find('hud-frenzy')
+  const flash = find('hud-flash')
+  const flights = find('hud-flights')
+  const goalLine = find('hud-goal')
+  const goalText = goalLine.querySelector('span')!
+  const chain = find('hud-chain')
+  const chainCount = chain.querySelector('b')!
+  const chainNote = chain.querySelector('span')!
+  const walletCoin = root.querySelector<HTMLElement>('.wallet > .coin')!
+  /** People who ask their device for less motion get the numbers without the flights, flashes and bumps. */
+  const calm = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+
+  /** Coins that fly from a point on the screen to the wallet. */
+  const fly = (x: number, y: number, count: number) => {
+    if (calm) return
+    const wallet = walletCoin.getBoundingClientRect()
+    const dx = wallet.left + wallet.width / 2 - x
+    const dy = wallet.top + wallet.height / 2 - y
+    for (let n = 0; n < count && flights.childElementCount < MAX_FLYING; n++) {
+      const coin = document.createElement('span')
+      coin.className = 'coin fly'
+      coin.style.left = `${x}px`
+      coin.style.top = `${y}px`
+      flights.append(coin)
+      const aside = (Math.random() - 0.5) * 90
+      const flight = coin.animate(
+        [
+          { transform: 'translate(-50%, -50%) scale(0.4)', opacity: 0 },
+          { transform: `translate(calc(-50% + ${aside}px), calc(-50% - 50px)) scale(1)`, opacity: 1, offset: 0.25 },
+          { transform: `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px)) scale(0.6)`, opacity: 0.9 },
+        ],
+        { duration: 650 + n * 60, delay: n * 55, easing: 'cubic-bezier(0.5, 0, 0.3, 1)', fill: 'both' },
+      )
+      flight.onfinish = flight.oncancel = () => {
+        coin.remove()
+        walletCoin.animate([{ transform: 'scale(1.4)' }, { transform: 'scale(1)' }], { duration: 180 })
+      }
+    }
+  }
 
   const pop = (x: number, y: number, text: string, tone: PopTone) => {
     if (root.hidden || (tone === 'tip' && pops.childElementCount >= MAX_POPS)) return
+    if (tone === 'coin') fly(x, y, 1)
+    else if (tone === 'rare') fly(x, y, 5)
     const el = document.createElement('span')
     el.className = `pop pop-${tone}`
     el.textContent = text
@@ -276,6 +347,11 @@ export function createHud(root: HTMLElement, actions: HudActions, labels: HudLab
   let rateShown = ''
   let workshopShown = ''
   let dotShown = false
+  let frenzyShown = ''
+  let goalShown = ''
+  let chainShown = 0
+  /** The best chain before the one that is running, to tell when it is beaten. */
+  let bestBefore = 0
   // Coins ever earned, sampled once a second, oldest first.
   let samples: number[] = []
   let sampleClock = 0
@@ -302,6 +378,38 @@ export function createHud(root: HTMLElement, actions: HudActions, labels: HudLab
         if (rateText !== rateShown) {
           rate.textContent = rateShown = rateText
           rate.hidden = rateText === ''
+        }
+
+        // The nearest goal, at what the line has really earned lately. One lump sum must not swing the estimate.
+        const steady = steadyIncome(state)
+        const lately = samples.length > 10 ? perMinute / 60 : steady
+        const goal = nextGoal(state, Math.min(Math.max(lately, steady * 0.5), steady * 2))
+        const words = goal ? goalWords(goal) : ''
+        if (words !== goalShown) {
+          goalText.textContent = goalShown = words
+          goalLine.hidden = words === ''
+        }
+      }
+
+      // A frenzy, while one lasts.
+      const frenzyText = state.frenzyLeft > 0 ? `Frenzy ×${state.config.frenzyPay} · ${Math.ceil(state.frenzyLeft)}s` : ''
+      if (frenzyText !== frenzyShown) {
+        frenzy.textContent = frenzyShown = frenzyText
+        frenzy.hidden = frenzyText === ''
+        root.classList.toggle('frenzy', frenzyText !== '')
+      }
+
+      // The chain of hand sorts: a number that jumps with every sort and goes when the chain ends.
+      if (state.chain === 0) bestBefore = state.bestChain
+      const chainNow = state.chain >= SHOW_CHAIN_FROM ? state.chain : 0
+      if (chainNow !== chainShown) {
+        chainShown = chainNow
+        chain.hidden = chainNow === 0
+        if (chainNow > 0) {
+          chainCount.textContent = String(chainNow)
+          const best = bestBefore >= SHOW_CHAIN_FROM && chainNow > bestBefore ? ' · your best' : ''
+          chainNote.textContent = `chain · tips ×${chainTip(state).toFixed(1)}${best}`
+          if (!calm) chainCount.animate([{ transform: 'scale(1.35)' }, { transform: 'scale(1)' }], { duration: 160, easing: 'ease-out' })
         }
       }
 
@@ -411,9 +519,14 @@ export function createHud(root: HTMLElement, actions: HudActions, labels: HudLab
 
     pop,
 
-    toast(title, body, kind) {
+    flash() {
+      if (calm || root.hidden) return
+      flash.animate([{ opacity: 0.55 }, { opacity: 0 }], { duration: 650, easing: 'ease-out' })
+    },
+
+    toast(title, body, kind, tone) {
       const toast = document.createElement('div')
-      toast.className = kind ? `toast tier-${kind.tier}` : 'toast'
+      toast.className = kind ? `toast tier-${kind.tier}` : tone ? `toast toast-${tone}` : 'toast'
       const ball = kind ? `<span class="marble-ball" style="background-image:url(${paintMarble(kind, 128).toDataURL()})"></span>` : ''
       toast.innerHTML = `${ball}<span class="toast-text"><b></b><span></span></span>`
       toast.querySelector('b')!.textContent = title
