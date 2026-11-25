@@ -93,6 +93,8 @@ export interface SimState {
   workshops: number
   /** Ids of the stamps earned, in the order they were earned. */
   stamps: string[]
+  /** How many unlocks the player has been told about. The rules do not use it; it only stops a notice from showing twice. */
+  unlocksSeen: number
 }
 
 export type SimEvent =

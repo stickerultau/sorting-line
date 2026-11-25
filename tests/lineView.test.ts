@@ -1,8 +1,9 @@
 import * as THREE from 'three'
 import { describe, expect, it } from 'vitest'
-import { DEFAULT_CONFIG, type SimConfig } from '../src/content/content'
+import { DEFAULT_CONFIG, UNLOCKS, type SimConfig } from '../src/content/content'
 import { createSim, flick, tick } from '../src/sim/sim'
 import type { SimState } from '../src/sim/types'
+import { configFor } from '../src/sim/unlocks'
 import type { LineAudio } from '../src/view/audio'
 import { LineView, type LineFx } from '../src/view/lineView'
 import { buildModels, type LineSet } from '../src/view/models'
@@ -35,6 +36,7 @@ function bareSet(config: SimConfig): LineSet {
     setShelf() {},
     setLed() {},
     setLamp() {},
+    dispose() {},
     chute: new THREE.Vector3(0, 0.95, 0),
     bin: new THREE.Vector3(config.beltLength + 1.15, -0.75, 0),
   }
@@ -53,7 +55,7 @@ function makeView(state: SimState, camera = new THREE.PerspectiveCamera()) {
         .filter((child) => child instanceof THREE.Mesh && child.geometry === models.jarGeometry)
         .map((jar) => jar.position.toArray().map((n) => n.toFixed(2)).join()),
     ).size
-  return { view, scene, pops, jarPlaces }
+  return { view, scene, pops, jarPlaces, models }
 }
 
 const rareMeshes = (scene: THREE.Scene) => scene.children.filter((child) => child.userData.rare)
@@ -216,6 +218,39 @@ describe('LineView', () => {
       { type: 'luckyCaught', gift: 'upgrade', coins: 0, upgrade: 'belt' },
     ])
     expect(pops).toEqual(['+600', 'Frenzy!', 'Rare shower!', 'Order done!', 'Free upgrade!'])
+  })
+
+  it('stands a jar at every station of a line with five colours, and draws beads', () => {
+    const config = configFor({ ...QUIET, feedInterval: 0.25 }, UNLOCKS[UNLOCKS.length - 1].stars)
+    expect(config.stations).toHaveLength(5)
+    expect(config.families).toContain('bead')
+    const state = createSim(config, 4)
+    const { view, scene, jarPlaces } = makeView(state)
+    expect(jarPlaces()).toBe(5)
+    for (let t = 0; t < 20; t += 1 / 32) {
+      view.handle(tick(state, 1 / 32))
+      view.update(state, 1 / 32)
+    }
+    const beads = scene.children.find((child) => child instanceof THREE.InstancedMesh && child.geometry.type === 'TorusGeometry') as THREE.InstancedMesh
+    expect(beads.count).toBeGreaterThan(0)
+  })
+
+  it('gives a golden jar a gold lid', () => {
+    const state = createSim(QUIET, 1)
+    const { view, scene, models } = makeView(state)
+    const goldLids = () => scene.children.filter((child) => child instanceof THREE.Mesh && child.material === models.gold).length
+    view.handle([{ type: 'jarFull', station: 0, shelfIndex: 0, coins: 10, golden: false }])
+    expect(goldLids()).toBe(0)
+    view.handle([{ type: 'jarReady', station: 0 }, { type: 'jarFull', station: 0, shelfIndex: 1, coins: 50, golden: true }])
+    expect(goldLids()).toBe(1)
+  })
+
+  it('takes its item meshes away when it is disposed of, so a new line can be built', () => {
+    const state = createSim(QUIET, 1)
+    const { view, scene } = makeView(state)
+    expect(scene.children.some((child) => child instanceof THREE.InstancedMesh)).toBe(true)
+    view.dispose()
+    expect(scene.children.some((child) => child instanceof THREE.InstancedMesh)).toBe(false)
   })
 
   it('shows the coins a full jar pays', () => {

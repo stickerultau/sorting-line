@@ -15,6 +15,12 @@ There is always a next goal, at four time scales:
 - **Marble ranks (hours):** catching the same marble again raises its rank: found, bronze, silver, gold at 1, 5, 15 and 40 catches. Every rank adds coins for good.
 - **New workshop (an hour or so):** once a workshop has earned enough, you can open a new one. Coins and upgrades start again; you keep your marbles and gain stars, and each star adds 15% to every payment for good.
 
+The workshop keeps changing as stars add up:
+
+- **Unlocks (days):** eight lasting changes come at star totals. In order: a green station, a catcher for missed lucky marbles, beads, golden jars, a twin chute, a magnet that slows rare marbles, a purple station and a night shift. The upgrades panel shows the ones you hold and the next one; the rest stay a secret.
+- **Marble sets (days to weeks):** the 24 rare marbles come in six sets of four. A full set adds 10% to every payment. Three sets arrive with unlocks.
+- **Stamps (minutes to months):** 52 marks for things done, such as 1,000 jars shelved or a chain of 50. Each one adds 1% to every payment. Four are hidden until earned.
+
 Nothing here can be bought, and nothing is lost by waiting. The only thing with a clock on it is the lucky marble, and missing one loses nothing you had.
 
 It started as the one-week clip prototype from the development plan (`../SORTING_LINE_DEVELOPMENT_PLAN.md`). Its job is still to be filmed and to be put in front of strangers.
@@ -46,7 +52,8 @@ Then open http://localhost:5173.
 - **Click any other item on the belt:** sorts it by hand into its jar, for a small tip. It also fills the rush meter and builds the chain.
 - **Orders:** click a finished order to claim its coins.
 - **Upgrades:** spend coins on a quicker feeder, a faster belt, better lids, a luckier chute, a spotter arm that catches the rare marbles you miss, an order book and a longer rush. **New workshop** is at the foot of this panel.
-- **Marbles:** the collection. Twelve kinds in three tiers, each with four ranks.
+- **Marbles:** the collection. Twenty-four kinds in six sets and three tiers, each with four ranks.
+- **Records:** lifetime numbers and the stamp book.
 - **Time:** follows the clock on your device, or steps through morning, noon, sunset and night.
 - **Change view:** switches between the whole line and a close-up of the three stations.
 - **Detail:** `low` drops the depth blur, the lamp's shadows, the blur behind the overlay and the extra pixels of sharp screens. On either setting the game draws fewer pixels by itself when the machine cannot keep up, and tries the full size again later.
@@ -79,10 +86,10 @@ For TikTok, Shorts and Reels, make the window tall and narrow (9:16). The shelf 
 
 | Folder | Contents |
 |---|---|
-| `src/sim/` | The rules: sorting, coins, upgrades, rare marbles, orders, rush, the sorting chain, lucky marbles, marble ranks, new workshops, the next goal, saving and time away. Deterministic, no rendering code, covered by tests |
-| `src/content/` | Colours, item families, rare marbles, upgrades and the line's settings |
+| `src/sim/` | The rules: sorting, coins, upgrades, rare marbles, orders, rush, the sorting chain, lucky marbles, marble ranks and sets, new workshops, unlocks, stamps, the next goal, saving and time away. Deterministic, no rendering code, covered by tests |
+| `src/content/` | Colours, item families, rare marbles and their sets, upgrades, unlocks and the line's settings |
 | `src/view/` | three.js scene, light through the day, glow and depth blur, placeholder models and marble patterns built in code, motion and synthesized sound |
-| `src/ui/` | The overlay: coins, orders, next goal, rush meter, chain, upgrades, new workshop, collection |
+| `src/ui/` | The overlay: coins, orders, next goal, rush meter, chain, upgrades, new workshop and unlocks, collection, records and stamps |
 | `tests/` | Rule, layout and view tests |
 | `spike/` | The throwaway technical spike and its results (`spike/RESULTS.md`). Not part of the game |
 | `docs/superpowers/plans/` | The build plan for this milestone |
@@ -90,6 +97,8 @@ For TikTok, Shorts and Reels, make the window tall and narrow (9:16). The shelf 
 ## Prices
 
 A new player's first minutes are tuned so that something good comes early: orders are short until three have been claimed, the first lucky marble comes after ninety seconds, and a line with room for a rare marble never waits longer than three times the usual wait for one. In a simulated two hours, a player who caught every lucky marble earned about 40% more than one who caught none.
+
+The star totals for the unlocks were set against a simulated player who plays half an hour a day, sorts one item every two seconds, catches every lucky marble and opens a new workshop when it adds half again to the stars. That player earned the eight unlocks on days 1, 2, 3, 5, 7, 9, 11 and 13. One who played an hour a day had them all by day 9; one who played fifteen minutes and rarely clicked had four after two weeks.
 
 Prices were set against a simulated player over eight hours, not against real players. In that run a player who only claims orders buys something about every thirty seconds, finishes an order every one to three minutes, and opens the first new workshop after about eighty minutes; one who also clicks once a second gets there in about fifty. Later workshops take thirty-five to sixty minutes each. Real players will play differently, so treat these as a second pass.
 

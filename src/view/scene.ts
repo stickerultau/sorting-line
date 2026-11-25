@@ -14,8 +14,10 @@ export interface Stage {
   renderer: THREE.WebGLRenderer
   /** Call when the canvas changes size. */
   resize(): void
-  /** Switches between the whole line and a close-up of the three stations. */
+  /** Switches between the whole line and a close-up of the stations. */
   toggleView(): void
+  /** Tells the camera where the first and last station stand, so an upright phone shows them all. */
+  setStations(first: number, last: number): void
   /** 'tall' for a phone held upright, otherwise 'wide'. */
   orientation(): Orientation
   /** Moves the light to an hour of the day (0 to 24). It glides there unless `instant` is set. */
@@ -120,10 +122,12 @@ export function createStage(canvas: HTMLCanvasElement, startQuality: Quality = '
   let frameSeconds = 1 / 60
   let lastFrameAt = 0
 
+  /** How wide a stretch of the line an upright phone shows. It grows with the number of stations. */
+  let tallWidth = FRAMES.tall.width
   const orientation = () => orientationFor(camera.aspect)
   const showsWholeLine = () => (chosen ? chosen === 'whole' : orientation() === 'wide' && camera.aspect >= 2.6)
   const place = () => {
-    const frame = showsWholeLine() ? FRAMES.full : orientation() === 'tall' ? FRAMES.tall : FRAMES.close
+    const frame = showsWholeLine() ? FRAMES.full : orientation() === 'tall' ? { ...FRAMES.tall, width: tallWidth } : FRAMES.close
     // The extra distance covers the jars, which stand in front of the framing plane.
     const distance = fitDistance(frame.width, frame.height, FOV, camera.aspect) + 1.8
     camera.position.set(frame.x, frame.y + Math.sin(ELEVATION) * distance, Math.cos(ELEVATION) * distance)
@@ -190,6 +194,10 @@ export function createStage(canvas: HTMLCanvasElement, startQuality: Quality = '
     resize,
     toggleView() {
       chosen = showsWholeLine() ? 'detail' : 'whole'
+      place()
+    },
+    setStations(first, last) {
+      tallWidth = Math.max(FRAMES.tall.width, last - first + 2.2)
       place()
     },
     orientation,

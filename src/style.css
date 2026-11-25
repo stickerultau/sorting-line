@@ -431,9 +431,71 @@ button:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
 /* Marble collection */
 .marble-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 8px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
 }
+
+/* Four marbles to a row need a little more room than the other panels. */
+#hud-marbles { width: min(430px, 100%); }
+.marble-grid .marble { padding: 10px 4px 8px; }
+.marble-grid .marble-ball { width: 46px; height: 46px; }
+.marble-grid .marble-name, .marble-grid .marble-count { overflow-wrap: anywhere; }
+
+/* Each set of four marbles has a heading across the grid. */
+.set-head {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  margin-top: 8px;
+  color: var(--ink-soft);
+  font-size: 12px;
+}
+
+.set-head span { text-align: right; }
+.set-head b { color: var(--ink); font-size: 11.5px; letter-spacing: 0.08em; text-transform: uppercase; }
+.set-head.full span { color: var(--gold); font-weight: 700; }
+.marble.locked { opacity: 0.35; }
+
+/* Records: lifetime numbers and stamps */
+.numbers { display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; margin: 0 0 16px; }
+.numbers dt { color: var(--ink-soft); }
+.numbers dd { margin: 0; text-align: right; font-weight: 700; font-variant-numeric: tabular-nums; }
+.stamp-grid { display: flex; flex-wrap: wrap; gap: 6px; }
+
+.stamp {
+  padding: 4px 10px;
+  border: 1px solid var(--edge);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--ink-soft);
+  font-size: 12px;
+}
+
+.stamp.on { border-color: var(--gold); background: var(--gold); color: #2a1c00; font-weight: 700; }
+
+/* The unlocks that stars bring, in the new workshop section */
+.workshop h2:not(:first-child) { margin-top: 16px; }
+.unlocks { display: grid; gap: 6px; margin: 0 0 12px; padding: 0; list-style: none; }
+
+.unlocks li {
+  display: grid;
+  grid-template-columns: 54px 1fr;
+  gap: 1px 8px;
+  padding: 7px 10px;
+  border: 1px solid var(--edge);
+  border-radius: 10px;
+  color: var(--ink-soft);
+  font-size: 12.5px;
+}
+
+.unlocks li b { grid-row: 1 / span 2; align-self: center; color: var(--gold); font-variant-numeric: tabular-nums; }
+.unlock-name { color: var(--ink); font-weight: 700; }
+.unlock-blurb:empty { display: none; }
+.unlocks li.held { border-color: rgba(95, 227, 161, 0.5); }
+.unlocks li.held .unlock-name::after { content: ' ✓'; color: var(--green); }
+.unlocks li.next { border-color: var(--gold); background: rgba(255, 200, 87, 0.1); }
 
 .marble {
   display: grid;

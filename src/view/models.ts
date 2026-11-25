@@ -52,6 +52,8 @@ export interface LineSet {
   chute: THREE.Vector3
   /** Where unsorted items land. */
   bin: THREE.Vector3
+  /** Frees the set's shapes, materials and pictures. Call when a new set replaces it. */
+  dispose(): void
 }
 
 function canvasTexture(size: number, draw: (g: CanvasRenderingContext2D, size: number) => void): THREE.CanvasTexture {
@@ -342,5 +344,19 @@ export function buildSet(models: Models, config: SimConfig): LineSet {
     },
     chute: new THREE.Vector3(0, 0.95, 0),
     bin: new THREE.Vector3(binX, -0.75, 0),
+    dispose() {
+      // The enamel belongs to the models and is used again by the next set.
+      const shared = new Set<THREE.Material>(Object.values(models.enamel))
+      group.traverse((object) => {
+        if (!(object instanceof THREE.Mesh)) return
+        object.geometry.dispose()
+        for (const material of [object.material].flat() as THREE.MeshStandardMaterial[]) {
+          if (shared.has(material)) continue
+          material.map?.dispose()
+          material.dispose()
+        }
+      })
+      group.removeFromParent()
+    },
   }
 }

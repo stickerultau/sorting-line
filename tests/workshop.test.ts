@@ -215,10 +215,16 @@ describe('lifetime counts', () => {
 
     const { state: back } = resume(DEFAULT_CONFIG, 9, parseSave(JSON.parse(JSON.stringify(toSave(state, NOW)))), NOW + 5_000)
     expect([back.handSorted, back.rareByHand, back.rushes, back.workshops]).toEqual([4, 1, 1, 1])
+    // How many unlocks the player has been told about is kept too; a save from before unlocks has been told of none.
+    state.unlocksSeen = 3
+    expect(resume(DEFAULT_CONFIG, 9, parseSave(JSON.parse(JSON.stringify(toSave(state, NOW)))), NOW + 5_000).state.unlocksSeen).toBe(3)
+    expect(parseSave({ ...toSave(state, NOW), unlocksSeen: 99 })!.unlocksSeen).toBe(UNLOCKS.length)
     const old = JSON.parse(JSON.stringify(toSave(state, NOW)))
     for (const key of ['handSorted', 'rareByHand', 'rushes', 'workshops', 'stamps']) delete old[key]
     const { state: fromOld } = resume(DEFAULT_CONFIG, 9, parseSave(old), NOW + 5_000)
     expect([fromOld.handSorted, fromOld.rareByHand, fromOld.rushes, fromOld.workshops, fromOld.stamps]).toEqual([0, 0, 0, 0, []])
+    delete old.unlocksSeen
+    expect(resume(DEFAULT_CONFIG, 9, parseSave(old), NOW + 5_000).state.unlocksSeen).toBe(0)
   })
 })
 

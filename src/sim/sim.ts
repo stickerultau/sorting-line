@@ -67,6 +67,7 @@ export function createSim(config: SimConfig, seed: number): SimState {
     rushes: 0,
     workshops: 0,
     stamps: [],
+    unlocksSeen: 0,
   }
   dealOrders(state)
   return state

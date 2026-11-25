@@ -24,14 +24,14 @@ export interface Unlock {
 
 // The star totals were set against a simulated player who plays half an hour a day (see the README).
 export const UNLOCKS: Unlock[] = [
-  { id: 'green', name: 'Green', blurb: 'A fourth colour and jar station, and four new marbles to find.', stars: 1 },
-  { id: 'catcher', name: 'Catcher', blurb: 'Collects a lucky marble you miss, for half a gift of coins.', stars: 2 },
-  { id: 'beads', name: 'Beads', blurb: 'A third kind of item, with its own orders and four new marbles.', stars: 3 },
-  { id: 'golden', name: 'Golden jars', blurb: 'Every tenth jar is golden and pays five times.', stars: 5 },
-  { id: 'twin', name: 'Twin chute', blurb: 'Items drop two at a time: the line carries twice as much.', stars: 8 },
-  { id: 'magnet', name: 'Magnet', blurb: 'Rare marbles ride the belt at half speed, so they are easier to catch.', stars: 12 },
-  { id: 'purple', name: 'Purple', blurb: 'A fifth colour and jar station, and four new marbles to find.', stars: 16 },
-  { id: 'night', name: 'Night shift', blurb: 'Time away pays three quarters, for up to twelve hours.', stars: 22 },
+  { id: 'green', name: 'Green', blurb: 'A fourth colour and jar station, and four new marbles to find.', stars: 3 },
+  { id: 'catcher', name: 'Catcher', blurb: 'Collects a lucky marble you miss, for half a gift of coins.', stars: 40 },
+  { id: 'beads', name: 'Beads', blurb: 'A third kind of item, with its own orders and four new marbles.', stars: 200 },
+  { id: 'golden', name: 'Golden jars', blurb: 'Every tenth jar is golden and pays five times.', stars: 700 },
+  { id: 'twin', name: 'Twin chute', blurb: 'Items drop two at a time: the line carries twice as much.', stars: 1_800 },
+  { id: 'magnet', name: 'Magnet', blurb: 'Rare marbles ride the belt at half speed, so they are easier to catch.', stars: 4_000 },
+  { id: 'purple', name: 'Purple', blurb: 'A fifth colour and jar station, and four new marbles to find.', stars: 7_000 },
+  { id: 'night', name: 'Night shift', blurb: 'Time away pays three quarters, for up to twelve hours.', stars: 12_000 },
 ]
 
 export type RareId =

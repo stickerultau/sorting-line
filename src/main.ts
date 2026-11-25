@@ -1,8 +1,9 @@
 import * as THREE from 'three'
 import './style.css'
-import { DEFAULT_CONFIG, MASTERY_BONUS, MASTERY_NAME, RARES, TIER_NAME, UPGRADES } from './content/content'
+import { DEFAULT_CONFIG, MASTERY_BONUS, MASTERY_NAME, RARES, TIER_NAME, UNLOCKS, UPGRADES } from './content/content'
 import { parseSave, payAway, resume, toSave, type Away, type SaveData } from './sim/save'
 import { MAX_DT, buy, catchLucky, claimOrder, flick, masteryRank, prestige, tick } from './sim/sim'
+import { STAMPS } from './sim/stamps'
 import { warmUp } from './sim/warmup'
 import type { SimEvent } from './sim/types'
 import { createHud } from './ui/hud'
@@ -64,7 +65,6 @@ const stage = (() => {
 })()
 document.documentElement.dataset.quality = stage.quality()
 const models = buildModels()
-const lineSet = buildSet(models, state.config)
 const audio = createAudio()
 
 let saving = !fresh
@@ -136,12 +136,22 @@ const hud = createHud(
       return coins
     },
     prestige() {
+      const config = state.config
       const stars = prestige(state)
       if (stars === 0) return 0
       audio.unlock()
       audio.star()
       const share = Math.round(state.stars * state.config.starBonus * 100)
       hud.toast('New workshop', `+${compact(stars)} ★ · every payment is now +${share}%`)
+      announceUnlocks()
+      // New colours or kinds of item mean a new line: the old one is taken down and the new one built in its place.
+      if (state.config !== config) {
+        state.config = { ...state.config, startShelved: state.shelved }
+        line.view.dispose()
+        line.set.dispose()
+        stage.scene.remove(line.root)
+        line = buildLine()
+      }
       save()
       return stars
     },
@@ -170,20 +180,31 @@ const fx: LineFx = {
     hud.pop(rect.left + (onScreen.x * 0.5 + 0.5) * rect.width, rect.top + (-onScreen.y * 0.5 + 0.5) * rect.height, text, tone)
   },
 }
-const view = new LineView(stage.scene, stage.camera, models, lineSet, state.config, audio, fx)
-view.setOrientation(stage.orientation())
+/** Builds the line as the state's config lays it out: the set, and the view that moves items along it. */
+function buildLine() {
+  const root = new THREE.Group()
+  stage.scene.add(root)
+  const set = buildSet(models, state.config)
+  const view = new LineView(root, stage.camera, models, set, state.config, audio, fx)
+  view.setOrientation(stage.orientation())
+  const { stations } = state.config
+  stage.setStations(stations[0].x, stations[stations.length - 1].x)
+  return { root, set, view }
+}
+let line = buildLine()
 
 // Run the line for a few seconds before the first frame, so the page opens on a working line.
-view.silent = true
+line.view.silent = true
 warmUp(state, WARM_UP_SECONDS, 1 / 32, (events) => {
-  view.handle(events)
-  view.update(state, 1 / 32)
+  line.view.handle(events)
+  line.view.update(state, 1 / 32)
 })
-view.silent = false
+line.view.silent = false
 
 /** What a caught lucky marble gave, for the notice. */
 function giftWords(event: Extract<SimEvent, { type: 'luckyCaught' }>): string {
   const { config } = state
+  if (event.catcher) return `The catcher saved half of it: +${compact(event.coins)} coins`
   if (event.gift === 'coins') return `A burst of coins: +${compact(event.coins)}`
   if (event.gift === 'frenzy') return `Frenzy! Jars, tips and marbles pay ×${config.frenzyPay} for ${config.frenzySeconds} seconds`
   if (event.gift === 'shower') return `${config.luckyShower} rare marbles are coming down the belt`
@@ -192,7 +213,18 @@ function giftWords(event: Extract<SimEvent, { type: 'luckyCaught' }>): string {
 }
 
 function apply(events: SimEvent[]): void {
-  view.handle(events)
+  line.view.handle(events)
+  // Stamps: one notice each, or a single one when many come together, as they do for an old save.
+  const stamps = events.flatMap((event) => (event.type === 'stamp' ? [event.id] : []))
+  if (stamps.length > 0) {
+    audio.order()
+    const share = Math.round(state.config.stampBonus * 100)
+    if (stamps.length <= 2) {
+      for (const id of stamps) hud.toast('Stamp earned', `${STAMPS.find((stamp) => stamp.id === id)?.name} · +${share}% coins for good`, undefined, 'lucky')
+    } else {
+      hud.toast(`${stamps.length} stamps earned`, `+${stamps.length * share}% coins for good. See them under Records`, undefined, 'lucky')
+    }
+  }
   for (const event of events) {
     if (event.type === 'orderReady') audio.order()
     else if (event.type === 'rushStarted') {
@@ -204,7 +236,7 @@ function apply(events: SimEvent[]): void {
       if (state.luckyCaught === 0) hud.toast('A lucky marble!', 'Click it before it drifts away. It always brings a gift.', undefined, 'lucky')
     } else if (event.type === 'luckyCaught') {
       audio.gift()
-      buzz(40)
+      if (!event.catcher) buzz(40)
       hud.toast('Lucky marble', giftWords(event), undefined, 'lucky')
       save()
     }
@@ -228,6 +260,19 @@ function apply(events: SimEvent[]): void {
     hud.toast(title, `${TIER_NAME[kind.tier]} · ${how} · +${compact(event.coins)} coins${lasting}`, kind)
   }
 }
+
+/**
+ * Tells the player about every unlock held that they have not been told about: after a new workshop,
+ * and on the first visit with a save from before unlocks existed.
+ */
+function announceUnlocks(): void {
+  const fresh = UNLOCKS.filter((unlock, index) => index >= state.unlocksSeen && state.stars >= unlock.stars)
+  if (fresh.length === 0) return
+  state.unlocksSeen += fresh.length
+  if (fresh.length <= 2) for (const unlock of fresh) hud.toast(`Unlocked: ${unlock.name}`, unlock.blurb, undefined, 'lucky')
+  else hud.toast(`${fresh.length} unlocks`, `${fresh.map((unlock) => unlock.name).join(', ')}. See them under Upgrades`, undefined, 'lucky')
+}
+announceUnlocks()
 
 function welcomeBack(paid: Away): void {
   const hours = Math.floor(paid.seconds / 3600)
@@ -264,11 +309,11 @@ if (params.has('fps')) {
 canvas.addEventListener('pointerdown', (event) => {
   if (event.button !== 0) return
   audio.unlock()
-  if (view.luckyAt(event.clientX, event.clientY, canvas)) {
+  if (line.view.luckyAt(event.clientX, event.clientY, canvas)) {
     apply(catchLucky(state))
     return
   }
-  const id = view.itemAt(event.clientX, event.clientY, canvas)
+  const id = line.view.itemAt(event.clientX, event.clientY, canvas)
   if (id === null) return
   const events = flick(state, id)
   if (events.length > 0) debug.handSorts++
@@ -277,7 +322,7 @@ canvas.addEventListener('pointerdown', (event) => {
 
 new ResizeObserver(() => {
   stage.resize()
-  view.setOrientation(stage.orientation())
+  line.view.setOrientation(stage.orientation())
 }).observe(canvas)
 
 setInterval(save, SAVE_EVERY_MS)
@@ -297,7 +342,7 @@ function frame(now: number): void {
   const paid = payAway(state, Math.floor((wall - lastFrameAt) / 1000))
   lastFrameAt = wall
   if (paid) {
-    view.restock(state.shelved)
+    line.view.restock(state.shelved)
     welcomeBack(paid)
     save()
   }
@@ -307,11 +352,11 @@ function frame(now: number): void {
     const lineDt = slowLeft > 0 ? dt * SLOW_RATE : dt
     slowLeft = Math.max(0, slowLeft - dt)
     apply(tick(state, lineDt))
-    view.update(state, lineDt)
+    line.view.update(state, lineDt)
     hud.update(state, dt)
   }
   if (followClock) stage.setHour(clockHour())
   // The lamp strip under the shelf comes on for a rush or a frenzy, whatever the hour.
-  lineSet.setLamp(Math.max(stage.render(dt).lamp, state.rushLeft > 0 || state.frenzyLeft > 0 ? 1 : 0))
+  line.set.setLamp(Math.max(stage.render(dt).lamp, state.rushLeft > 0 || state.frenzyLeft > 0 ? 1 : 0))
 }
 requestAnimationFrame(frame)

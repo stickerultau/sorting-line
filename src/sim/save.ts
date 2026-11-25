@@ -1,4 +1,4 @@
-import { COLOUR_HEX, ORDER_KINDS, RARES, UPGRADES, type ColourId, type OrderKind, type RareId, type SimConfig, type UpgradeId } from '../content/content'
+import { COLOUR_HEX, ORDER_KINDS, RARES, UNLOCKS, UPGRADES, type ColourId, type OrderKind, type RareId, type SimConfig, type UpgradeId } from '../content/content'
 import { countTowardOrders, createSim, feedInterval, jarAverage, rushSeconds, steadyJarPay } from './sim'
 import { STAMPS } from './stamps'
 import { configFor, has } from './unlocks'
@@ -36,6 +36,7 @@ export interface SaveData {
   rushes: number
   workshops: number
   stamps: string[]
+  unlocksSeen: number
 }
 
 export interface Away {
@@ -74,6 +75,7 @@ export function toSave(state: SimState, now: number): SaveData {
     rushes: state.rushes,
     workshops: state.workshops,
     stamps: [...state.stamps],
+    unlocksSeen: state.unlocksSeen,
   }
 }
 
@@ -153,6 +155,7 @@ export function parseSave(raw: unknown): SaveData | null {
     rareByHand: count(data.rareByHand),
     rushes: count(data.rushes),
     workshops: count(data.workshops),
+    unlocksSeen: count(data.unlocksSeen, UNLOCKS.length),
     stamps: STAMPS.map((stamp) => stamp.id).filter((id) => Array.isArray(data.stamps) && data.stamps.includes(id)),
     shelved: count(data.shelved),
     sorted: count(data.sorted),
@@ -218,6 +221,7 @@ export function resume(config: SimConfig, seed: number, data: SaveData | null, n
   state.rushes = data.rushes
   state.workshops = data.workshops
   state.stamps = [...data.stamps]
+  state.unlocksSeen = data.unlocksSeen
   state.recycle.push(...data.rares.map((rare) => ({ family: 'marble' as const, colour: config.stations[0].colour, rare })))
   // Saved orders are kept only if this line can still do every one of them.
   const fits = (order: Order) =>

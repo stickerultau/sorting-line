@@ -1,7 +1,9 @@
-import { COLOUR_HEX, MASTERY_AT, MASTERY_NAME, RARES, TIER_NAME, UPGRADES, type RareKind, type UpgradeId } from '../content/content'
+import { COLOUR_HEX, MASTERY_AT, MASTERY_NAME, RARES, SETS, TIER_NAME, UNLOCKS, UPGRADES, type RareKind, type UpgradeId } from '../content/content'
 import { nextGoal, type Goal } from '../sim/goal'
 import { chainTip, collectionBonus, masteryRank, nextStarAt, orderReward, rushSeconds, starsWaiting, steadyIncome, upgradeCost } from '../sim/sim'
+import { STAMPS } from '../sim/stamps'
 import type { Order, SimState } from '../sim/types'
+import { has, nextUnlock, setsComplete } from '../sim/unlocks'
 import { compact } from '../view/format'
 import { paintMarble } from '../view/marbleArt'
 
@@ -62,8 +64,24 @@ function orderWords(order: Order): { full: string; short: string } {
   if (order.kind === 'jars') return { full: `Shelve ${compact(order.need)} jars`, short: 'Jars' }
   if (order.kind === 'colour') return { full: `Shelve ${compact(order.need)} ${order.colour} jars`, short: capital(order.colour ?? '') }
   if (order.kind === 'hand') return { full: `Sort ${compact(order.need)} items by hand`, short: 'By hand' }
+  if (order.kind === 'beads') return { full: `Put ${compact(order.need)} beads in jars`, short: 'Beads' }
   return { full: order.need === 1 ? 'Catch a rare marble' : `Catch ${order.need} rare marbles`, short: 'Catch' }
 }
+
+/** The lifetime numbers on the records panel. */
+const NUMBERS: [string, (state: SimState) => number][] = [
+  ['Jars shelved', (s) => s.shelved],
+  ['Items sorted', (s) => s.sorted],
+  ['Sorted by hand', (s) => s.handSorted],
+  ['Coins earned', (s) => s.earned],
+  ['Orders finished', (s) => s.ordersDone],
+  ['Rare marbles caught by hand', (s) => s.rareByHand],
+  ['Lucky marbles caught', (s) => s.luckyCaught],
+  ['Longest chain', (s) => s.bestChain],
+  ['Rushes', (s) => s.rushes],
+  ['New workshops', (s) => s.workshops],
+  ['Stars', (s) => s.stars],
+]
 
 /** A wait in words. It is an estimate, so it is rounded the way a person would say it. */
 function about(seconds: number): string {
@@ -100,6 +118,7 @@ export function createHud(root: HTMLElement, actions: HudActions, labels: HudLab
       <nav class="tools">
         <button type="button" class="tool tool-main" id="hud-open-upgrades" aria-expanded="false">Upgrades<span class="dot" id="hud-can-buy" hidden></span></button>
         <button type="button" class="tool tool-main" id="hud-open-marbles" aria-expanded="false">Marbles <span class="tool-note" id="hud-found">0/${RARES.length}</span></button>
+        <button type="button" class="tool tool-main" id="hud-open-records" aria-expanded="false">Records <span class="tool-note" id="hud-stamps">0/${STAMPS.length}</span></button>
         <button type="button" class="tool" id="hud-time">${labels.time}</button>
         <button type="button" class="tool" id="hud-view">Change view</button>
         <button type="button" class="tool" id="hud-quality">${labels.quality}</button>
@@ -123,7 +142,10 @@ export function createHud(root: HTMLElement, actions: HudActions, labels: HudLab
         <span class="star-track"><span class="star-fill" id="hud-star-fill"></span></span>
         <p class="panel-note" id="hud-star-next"></p>
         <button type="button" class="prestige" id="hud-prestige" disabled></button>
-        <p class="panel-note fine">Coins and upgrades start again. Stars, marbles and shelved jars stay.</p>
+        <p class="panel-note fine">Coins and upgrades start again. Stars, marbles, stamps and shelved jars stay.</p>
+        <h2>Unlocks</h2>
+        <p class="panel-note">Each one comes for good when your stars reach its mark.</p>
+        <ul class="unlocks" id="hud-unlocks"></ul>
       </div>
       <button type="button" class="link" id="hud-reset">Start over</button>
     </aside>
@@ -132,6 +154,13 @@ export function createHud(root: HTMLElement, actions: HudActions, labels: HudLab
       <p class="panel-note">Rare marbles glow on the belt. Click one to catch it for double coins. Catching more of a marble raises its rank, and every rank adds coins for good.</p>
       <p class="panel-note bonus" id="hud-bonus"></p>
       <div class="marble-grid" id="hud-marble-grid"></div>
+    </aside>
+    <aside class="panel" id="hud-records" hidden>
+      <h2>Records</h2>
+      <dl class="numbers" id="hud-numbers"></dl>
+      <h2>Stamps</h2>
+      <p class="panel-note bonus" id="hud-stamp-bonus"></p>
+      <div class="stamp-grid" id="hud-stamp-grid"></div>
     </aside>
     <div class="toasts" id="hud-toasts" role="status"></div>
     <div class="pops" id="hud-pops" aria-hidden="true"></div>
@@ -216,6 +245,7 @@ export function createHud(root: HTMLElement, actions: HudActions, labels: HudLab
   const panels = [
     { button: find<HTMLButtonElement>('hud-open-upgrades'), panel: find('hud-upgrades') },
     { button: find<HTMLButtonElement>('hud-open-marbles'), panel: find('hud-marbles') },
+    { button: find<HTMLButtonElement>('hud-open-records'), panel: find('hud-records') },
   ]
   const show = (which: number | null) => {
     panels.forEach(({ button, panel }, index) => {
@@ -322,9 +352,51 @@ export function createHud(root: HTMLElement, actions: HudActions, labels: HudLab
   }
 
   // Collection cells, one per marble.
+  // Unlocks: one line each, in the order they come.
+  const unlockList = find('hud-unlocks')
+  const unlockRows = UNLOCKS.map((unlock) => {
+    const row = document.createElement('li')
+    row.innerHTML = `<b>★ ${compact(unlock.stars)}</b><span class="unlock-name"></span><span class="unlock-blurb"></span>`
+    unlockList.append(row)
+    return { unlock, row, name: row.querySelector<HTMLElement>('.unlock-name')!, blurb: row.querySelector<HTMLElement>('.unlock-blurb')! }
+  })
+
+  // Records: lifetime numbers and stamps.
+  const numbers = find('hud-numbers')
+  const numberRows = NUMBERS.map(([label, read]) => {
+    const term = document.createElement('dt')
+    term.textContent = label
+    const value = document.createElement('dd')
+    numbers.append(term, value)
+    return { read, value, shown: '' }
+  })
+  const stampGrid = find('hud-stamp-grid')
+  const stampChips = STAMPS.map((stamp) => {
+    const chip = document.createElement('span')
+    chip.className = 'stamp'
+    stampGrid.append(chip)
+    return { stamp, chip }
+  })
+  const stampCount = find('hud-stamps')
+  const stampBonus = find('hud-stamp-bonus')
+  let stampsShown = -1
+  let stampChipsShown = -1
+  let unlocksShown = -1
+
+  // Collection cells, one per marble, under a heading for each set.
   const grid = find('hud-marble-grid')
-  const cells = RARES.map((kind) => {
+  const setHeads: { set: (typeof SETS)[number]; head: HTMLElement; note: HTMLElement; cells: HTMLElement[]; shown: string }[] = []
+  const cells = SETS.flatMap((set) => {
+    const head = document.createElement('div')
+    head.className = 'set-head'
+    head.innerHTML = `<b>${set.name}</b><span></span>`
+    grid.append(head)
+    const entry = { set, head, note: head.querySelector<HTMLElement>('span')!, cells: [] as HTMLElement[], shown: '' }
+    setHeads.push(entry)
+    return set.rares.map((id) => {
+    const kind = RARES.find((rare) => rare.id === id)!
     const cell = document.createElement('div')
+    entry.cells.push(cell)
     cell.className = `marble tier-${kind.tier}`
     cell.innerHTML = `
       <span class="marble-ball" style="background-image:url(${paintMarble(kind, 128).toDataURL()})"></span>
@@ -334,6 +406,7 @@ export function createHud(root: HTMLElement, actions: HudActions, labels: HudLab
       <span class="marble-count"></span>`
     grid.append(cell)
     return { kind, cell, count: cell.querySelector<HTMLElement>('.marble-count')!, pips: [...cell.querySelectorAll<HTMLElement>('.marble-rank i')], shown: -1 }
+    })
   })
 
   let coinsShown = -1
@@ -389,6 +462,25 @@ export function createHud(root: HTMLElement, actions: HudActions, labels: HudLab
           goalText.textContent = goalShown = words
           goalLine.hidden = words === ''
         }
+
+      }
+
+      // Records: the count on the button always, the rest only while the panel is open.
+      if (state.stamps.length !== stampsShown) stampCount.textContent = `${(stampsShown = state.stamps.length)}/${STAMPS.length}`
+      if (!panels[2].panel.hidden) {
+        for (const row of numberRows) {
+          const value = compact(row.read(state))
+          if (value !== row.shown) row.value.textContent = row.shown = value
+        }
+        if (state.stamps.length !== stampChipsShown) {
+          stampChipsShown = state.stamps.length
+          stampBonus.textContent = `${stampChipsShown} of ${STAMPS.length} earned: ${percent(stampChipsShown * state.config.stampBonus)} coins`
+          for (const { stamp, chip } of stampChips) {
+            const earned = state.stamps.includes(stamp.id)
+            chip.classList.toggle('on', earned)
+            chip.textContent = stamp.hidden && !earned ? '? ? ?' : stamp.name
+          }
+        }
       }
 
       // A frenzy, while one lasts.
@@ -410,6 +502,19 @@ export function createHud(root: HTMLElement, actions: HudActions, labels: HudLab
           const best = bestBefore >= SHOW_CHAIN_FROM && chainNow > bestBefore ? ' · your best' : ''
           chainNote.textContent = `chain · tips ×${chainTip(state).toFixed(1)}${best}`
           if (!calm) chainCount.animate([{ transform: 'scale(1.35)' }, { transform: 'scale(1)' }], { duration: 160, easing: 'ease-out' })
+        }
+      }
+
+      if (state.stars !== unlocksShown) {
+        unlocksShown = state.stars
+        const next = nextUnlock(state.stars)
+        for (const { unlock, row, name, blurb } of unlockRows) {
+          const held = state.stars >= unlock.stars
+          const isNext = unlock === next
+          row.className = held ? 'held' : isNext ? 'next' : ''
+          // What comes after the next one stays a secret.
+          name.textContent = held || isNext ? unlock.name : '? ? ?'
+          blurb.textContent = held || isNext ? unlock.blurb : ''
         }
       }
 
@@ -513,7 +618,22 @@ export function createHud(root: HTMLElement, actions: HudActions, labels: HudLab
             : `×${compact(owned)} · ${MASTERY_NAME[rank]}`
       }
       if (kinds !== foundShown) found.textContent = `${(foundShown = kinds)}/${RARES.length}`
-      const bonusText = `Collection bonus: ${percent(collectionBonus(state))} coins`
+      for (const entry of setHeads) {
+        const have = entry.set.rares.filter((rare) => (state.collection[rare] ?? 0) > 0).length
+        const unlock = UNLOCKS.find((candidate) => candidate.id === entry.set.unlock)
+        const locked = unlock !== undefined && !has(state, unlock.id)
+        const signature = `${have}|${locked}`
+        if (signature === entry.shown) continue
+        entry.shown = signature
+        const full = have === entry.set.rares.length
+        entry.head.classList.toggle('full', full)
+        for (const cell of entry.cells) cell.classList.toggle('locked', locked)
+        const share = percent(state.config.setBonus)
+        entry.note.textContent = locked
+          ? `Comes with ${unlock.name} at ★ ${compact(unlock.stars)}`
+          : full ? `Full set: ${share} coins` : `${have}/${entry.set.rares.length} · ${share} coins when full`
+      }
+      const bonusText = `Marble ranks: ${percent(collectionBonus(state))} coins · full sets: ${percent(setsComplete(state) * state.config.setBonus)}`
       if (bonusText !== bonusShown) bonus.textContent = bonusShown = bonusText
     },
 

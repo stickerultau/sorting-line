@@ -83,6 +83,10 @@ export function createAudio(): LineAudio {
         const f = (1500 + fill * 700) * jitter
         tone(f, 0.16, 0.22, 'sine')
         tone(f * 2.76, 0.07, 0.08, 'sine')
+      } else if (family === 'bead') {
+        const f = (1050 + fill * 450) * jitter
+        tone(f, 0.09, 0.18, 'sine')
+        tone(f * 1.5, 0.05, 0.06, 'triangle')
       } else {
         const f = (620 + fill * 300) * jitter
         tone(f, 0.06, 0.2, 'triangle')

@@ -1,6 +1,6 @@
 import * as THREE from 'three'
 import { COLOUR_HEX, RARES, type ColourId, type FamilyId, type LuckyGift, type RareId, type SimConfig } from '../content/content'
-import { beltSpeed } from '../sim/sim'
+import { beltSpeed, itemSpeed } from '../sim/sim'
 import type { BeltItem, SimEvent, SimState } from '../sim/types'
 import type { LineAudio } from './audio'
 import { compact } from './format'
@@ -57,7 +57,9 @@ const GOLD = new THREE.Color(0xffc24a)
  * The lucky marble floats above the front edge of the belt and drifts against the flow, so it stands out.
  * It keeps to the stretch between the stations, plus `beyond` at each end: every screen shape shows that much.
  */
-const LUCKY = { scale: 1.6, y: 1.15, z: 0.75, bob: 0.22, beyond: 1.2, turn: 2.4, pickPx: 46, trailEvery: 0.07 }
+const LUCKY = { scale: 1.6, y: 1.15, z: 0.75, bob: 0.22, beyond: 1.2, least: 4, most: 14, turn: 2.4, pickPx: 46, trailEvery: 0.07 }
+/** Flippers and landings closer together than this share one sound: a fast line would otherwise buzz. */
+const SOUND_GAP = 0.045
 const GIFT_WORDS: Record<LuckyGift, string> = { coins: '', frenzy: 'Frenzy!', shower: 'Rare shower!', order: 'Order done!', upgrade: 'Free upgrade!' }
 
 /** Repeatable pseudo-random number in [0, 1) from two integers. Keeps the look stable between runs. */
@@ -71,7 +73,7 @@ const euler = new THREE.Euler()
 
 function restQuaternion(family: FamilyId, seed: number): THREE.Quaternion {
   const q = new THREE.Quaternion()
-  if (family === 'button') return q.setFromAxisAngle(UP, noise(seed, 1) * Math.PI * 2)
+  if (family !== 'marble') return q.setFromAxisAngle(UP, noise(seed, 1) * Math.PI * 2) // buttons and beads lie flat
   return q.setFromEuler(euler.set(noise(seed, 1) * 6.28, noise(seed, 2) * 6.28, noise(seed, 3) * 6.28))
 }
 
@@ -87,7 +89,7 @@ export class LineView {
   /** When true, events make no sound. Used while the line is fast-forwarded before the first frame. */
   silent = false
 
-  private readonly scene: THREE.Scene
+  private readonly scene: THREE.Object3D
   private readonly camera: THREE.Camera
   private readonly models: Models
   private readonly set: LineSet
@@ -108,9 +110,15 @@ export class LineView {
   private luckyTrail = 0
   private travelled = 0
   private clock = 0
+  private lastSnap = -1
+  private lastClink = -1
 
+  /**
+   * `scene` is what the line is added to: the scene itself, or a group of its own so the whole line
+   * can be taken away and built again.
+   */
   constructor(
-    scene: THREE.Scene,
+    scene: THREE.Object3D,
     camera: THREE.Camera,
     models: Models,
     set: LineSet,
@@ -150,7 +158,7 @@ export class LineView {
     for (const event of events) {
       if (event.type === 'spawned') this.onSpawned(event.item)
       else if (event.type === 'sorted') this.onSorted(event.item, event.station, event.slot, event.byHand, event.coins, event.chain)
-      else if (event.type === 'jarFull') this.onJarFull(event.station, event.shelfIndex, event.coins)
+      else if (event.type === 'jarFull') this.onJarFull(event.station, event.shelfIndex, event.coins, event.golden)
       else if (event.type === 'jarReady') this.onJarReady(event.station)
       else if (event.type === 'caught') this.onCaught(event.item, event.rare, event.byHand, event.coins)
       else if (event.type === 'recycled') this.onRecycled(event.item)
@@ -169,7 +177,7 @@ export class LineView {
     for (const item of state.items) {
       const visual = this.belt.get(item.id) ?? this.addBeltVisual(item, 0)
       // The simulation moves in whole steps. Add the time carried between steps, so items glide with the belt.
-      const x = item.x + speed * state.acc
+      const x = item.x + itemSpeed(state, item) * state.acc
       visual.pos.set(x, REST_Y[visual.family] * visual.scale + visual.drop, visual.lane)
       if (visual.mesh) {
         visual.quat.premultiply(this.turn)
@@ -191,8 +199,8 @@ export class LineView {
     const total = this.config.luckySeconds
     const along = 1 - left / total
     const stations = this.config.stations
-    const from = stations[stations.length - 1].x + LUCKY.beyond
-    const to = stations[0].x - LUCKY.beyond
+    const from = Math.min(LUCKY.most, stations[stations.length - 1].x + LUCKY.beyond)
+    const to = Math.max(LUCKY.least, stations[0].x - LUCKY.beyond)
     this.lucky.visible = true
     this.lucky.position.set(from + (to - from) * along, LUCKY.y + Math.sin(this.clock * 2.1) * LUCKY.bob, LUCKY.z)
     // It swells in when it comes and shrinks away when its time is up.
@@ -216,6 +224,19 @@ export class LineView {
     const x = rect.left + (this.projected.x * 0.5 + 0.5) * rect.width
     const y = rect.top + (-this.projected.y * 0.5 + 0.5) * rect.height
     return Math.hypot(x - clientX, y - clientY) < LUCKY.pickPx
+  }
+
+  /** Frees what the view holds on the graphics card and takes its item meshes away. The view cannot be used afterwards. */
+  dispose(): void {
+    this.pool.dispose()
+    this.sparks.points.removeFromParent()
+    this.sparks.points.geometry.dispose()
+    ;(this.sparks.points.material as THREE.Material).dispose()
+    this.lucky.removeFromParent()
+    ;(this.lucky.material as THREE.Material).dispose()
+    this.luckyHalo.material.dispose()
+    for (const visual of this.belt.values()) if (visual.mesh) this.release(visual)
+    this.belt.clear()
   }
 
   /** Rearranges the shelf for a wide screen or an upright phone. */
@@ -426,7 +447,10 @@ export class LineView {
       if (!this.silent) this.audio.bonus(chain)
     } else {
       this.swing(station)
-      if (!this.silent) this.audio.snap()
+      if (!this.silent && this.clock - this.lastSnap >= SOUND_GAP) {
+        this.lastSnap = this.clock
+        this.audio.snap()
+      }
     }
 
     this.tweens.add(byHand ? 0.5 : 0.36, (k) => {
@@ -438,7 +462,10 @@ export class LineView {
     }, {
       done: () => {
         jar.items.push({ visual, local })
-        if (!this.silent) this.audio.clink(visual.family, slot / this.config.jarCapacity)
+        if (!this.silent && this.clock - this.lastClink >= SOUND_GAP) {
+          this.lastClink = this.clock
+          this.audio.clink(visual.family, slot / this.config.jarCapacity)
+        }
         this.tweens.add(0.14, (k) => {
           visual.scale = jar.scale * (1 - 0.16 * Math.sin(Math.PI * k))
           this.write(visual)
@@ -454,9 +481,10 @@ export class LineView {
     })
   }
 
-  private onJarFull(station: number, shelfIndex: number, coins: number): void {
+  private onJarFull(station: number, shelfIndex: number, coins: number, golden: boolean): void {
     const jar = this.stationJars[station]
     if (!jar) return
+    if (golden) jar.lid.material = this.models.gold
     this.stationJars[station] = null
     this.set.setLed(station, false)
     const colour = new THREE.Color(COLOUR_HEX[this.config.stations[station].colour])
@@ -474,10 +502,11 @@ export class LineView {
         if (!this.silent) {
           this.audio.tock()
           this.audio.jar(station)
+          if (golden) this.audio.rare(1)
         }
         const rim = jar.pos.clone().setY(jar.pos.y + JAR.height)
-        if (coins > 0) this.fx.pop(rim, `+${compact(coins)}`, 'coin')
-        this.sparks.burst(rim, GOLD, 16, 1.9, 2.4)
+        if (coins > 0) this.fx.pop(rim, `+${compact(coins)}`, golden ? 'rare' : 'coin')
+        this.sparks.burst(rim, GOLD, golden ? 44 : 16, golden ? 3 : 1.9, golden ? 4 : 2.4)
         this.sparks.burst(rim, colour, 12, 1.5, 2.4)
         const from = jar.pos.clone()
         this.clearShelfPlace(index)
