@@ -12,6 +12,12 @@ export interface LineAudio {
   /** A rare marble caught. Higher tiers ring longer. */
   rare(tier: number): void
   buy(): void
+  /** An order is finished and waits to be claimed. */
+  order(): void
+  /** A rush begins. */
+  rush(): void
+  /** A new workshop opens. */
+  star(): void
 }
 
 /** Synthesized placeholder sounds. Final foley comes later, per the development plan. */
@@ -99,6 +105,22 @@ export function createAudio(): LineAudio {
       tone(520, 0.09, 0.2, 'triangle')
       tone(780, 0.14, 0.2, 'triangle', undefined, 0.08)
       noise(0.03, 0.1, 2400)
+    },
+    order() {
+      tone(660, 0.18, 0.14, 'sine')
+      tone(990, 0.3, 0.14, 'sine', undefined, 0.1)
+    },
+    rush() {
+      const notes = [392, 523.3, 659.3, 784, 1046.5]
+      notes.forEach((note, i) => tone(note, 0.22, 0.18, 'triangle', undefined, i * 0.06))
+      noise(0.25, 0.08, 5200)
+    },
+    star() {
+      const notes = [523.3, 659.3, 784, 1046.5, 1318.5, 1568]
+      notes.forEach((note, i) => {
+        tone(note, 0.7, 0.16, 'sine', undefined, i * 0.09)
+        tone(note * 2, 0.35, 0.05, 'triangle', undefined, i * 0.09)
+      })
     },
   }
 }

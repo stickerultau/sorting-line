@@ -56,7 +56,7 @@ describe('saving', () => {
     })!
     expect(data.coins).toBe(0)
     expect(data.earned).toBe(0)
-    expect(data.shelved).toBeLessThanOrEqual(1e12)
+    expect(data.shelved).toBeLessThanOrEqual(1e15)
     expect(data.sorted).toBe(12)
     expect(data.upgrades.belt).toBe(UPGRADES.find((u) => u.id === 'belt')!.maxLevel)
     expect(data.upgrades.feeder).toBe(0)

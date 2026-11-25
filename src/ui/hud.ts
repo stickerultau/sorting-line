@@ -1,6 +1,7 @@
-import { RARES, TIER_NAME, UPGRADES, type RareKind, type UpgradeId } from '../content/content'
-import { upgradeCost } from '../sim/sim'
-import type { SimState } from '../sim/types'
+import { COLOUR_HEX, MASTERY_AT, MASTERY_NAME, RARES, TIER_NAME, UPGRADES, type RareKind, type UpgradeId } from '../content/content'
+import { collectionBonus, masteryRank, nextStarAt, orderReward, rushSeconds, starsWaiting, upgradeCost } from '../sim/sim'
+import type { Order, SimState } from '../sim/types'
+import { compact } from '../view/format'
 import { paintMarble } from '../view/marbleArt'
 
 export type PopTone = 'coin' | 'tip' | 'rare'
@@ -12,6 +13,8 @@ export interface Hud {
   pop(x: number, y: number, text: string, tone: PopTone): void
   /** A short notice at the top. `kind` adds a picture of that marble. */
   toast(title: string, body: string, kind?: RareKind): void
+  /** Forgets recent earnings, so a lump sum such as pay for time away does not show as coins a minute. */
+  settle(): void
 }
 
 export interface HudActions {
@@ -22,6 +25,10 @@ export interface HudActions {
   toggleView(): void
   /** Tries to buy the next level. Returns whether it did. */
   buy(id: UpgradeId): boolean
+  /** Claims a finished order. Returns the coins paid, or null if it was not finished. */
+  claim(slot: number): number | null
+  /** Opens a new workshop. Returns the stars gained, 0 if none was waiting. */
+  prestige(): number
   /** Erases all progress and starts again. */
   reset(): void
 }
@@ -33,16 +40,36 @@ export interface HudLabels {
 }
 
 const MAX_POPS = 26
-const number = (value: number) => Math.round(value).toLocaleString('en-US')
+/** Seconds of earnings the coins-a-minute figure looks back over. */
+const RATE_WINDOW = 30
+/** Upgrades with more levels than this show the level alone, not "of" a top that nobody reaches. */
+const SHOW_TOP_LEVEL_TO = 20
+const percent = (share: number) => `+${Math.round(share * 100)}%`
+const capital = (word: string) => word[0].toUpperCase() + word.slice(1)
 
-/** The overlay: coins, the upgrade shop, the marble collection and a few controls. Press H to hide it for recording. */
+/** What an order asks for, in full and in a word for narrow screens. */
+function orderWords(order: Order): { full: string; short: string } {
+  if (order.kind === 'jars') return { full: `Shelve ${compact(order.need)} jars`, short: 'Jars' }
+  if (order.kind === 'colour') return { full: `Shelve ${compact(order.need)} ${order.colour} jars`, short: capital(order.colour ?? '') }
+  if (order.kind === 'hand') return { full: `Sort ${compact(order.need)} items by hand`, short: 'By hand' }
+  return { full: order.need === 1 ? 'Catch a rare marble' : `Catch ${order.need} rare marbles`, short: 'Catch' }
+}
+
+/** The overlay: coins, orders, the rush meter, the upgrade shop, the marble collection and a few controls. Press H to hide it for recording. */
 export function createHud(root: HTMLElement, actions: HudActions, labels: HudLabels): Hud {
   root.innerHTML = `
+    <div class="rush-glow" aria-hidden="true"></div>
     <header class="bar">
       <div class="wallet" aria-live="off">
         <span class="coin" aria-hidden="true"></span>
         <span class="wallet-coins" id="hud-coins">0</span>
+        <span class="wallet-rate" id="hud-rate" hidden></span>
+        <span class="wallet-stars" id="hud-stars" hidden></span>
         <span class="wallet-jars"><b id="hud-jars">0</b> jars shelved</span>
+      </div>
+      <div class="rush" id="hud-rush" title="Sorting by hand fills this. When it is full, everything pays more for a while.">
+        <span class="rush-label" id="hud-rush-label">Rush</span>
+        <span class="rush-track"><span class="rush-fill" id="hud-rush-fill"></span></span>
       </div>
       <nav class="tools">
         <button type="button" class="tool tool-main" id="hud-open-upgrades" aria-expanded="false">Upgrades<span class="dot" id="hud-can-buy" hidden></span></button>
@@ -53,28 +80,64 @@ export function createHud(root: HTMLElement, actions: HudActions, labels: HudLab
         <button type="button" class="tool" id="hud-sound">${labels.sound}</button>
       </nav>
     </header>
+    <section class="orders" aria-label="Orders">
+      <h2>Orders <span id="hud-orders-done"></span></h2>
+      <div class="order-list" id="hud-order-list"></div>
+    </section>
     <aside class="panel" id="hud-upgrades" hidden>
       <h2>Upgrades</h2>
       <div class="upgrade-list" id="hud-upgrade-list"></div>
+      <div class="workshop">
+        <h2>New workshop</h2>
+        <p class="panel-note" id="hud-star-have"></p>
+        <span class="star-track"><span class="star-fill" id="hud-star-fill"></span></span>
+        <p class="panel-note" id="hud-star-next"></p>
+        <button type="button" class="prestige" id="hud-prestige" disabled></button>
+        <p class="panel-note fine">Coins and upgrades start again. Stars, marbles and shelved jars stay.</p>
+      </div>
       <button type="button" class="link" id="hud-reset">Start over</button>
     </aside>
     <aside class="panel" id="hud-marbles" hidden>
       <h2>Marble collection</h2>
-      <p class="panel-note">Rare marbles glow on the belt. Click one to catch it for double coins.</p>
+      <p class="panel-note">Rare marbles glow on the belt. Click one to catch it for double coins. Catching more of a marble raises its rank, and every rank adds coins for good.</p>
+      <p class="panel-note bonus" id="hud-bonus"></p>
       <div class="marble-grid" id="hud-marble-grid"></div>
     </aside>
     <div class="toasts" id="hud-toasts" role="status"></div>
     <div class="pops" id="hud-pops" aria-hidden="true"></div>
-    <p class="hint" id="hud-hint">Click a glowing marble to catch it. Click anything else on the belt to sort it by hand. Press H to hide this.</p>`
+    <p class="hint" id="hud-hint">Click a glowing marble to catch it. Click anything else on the belt to sort it by hand and fill the rush meter. Press H to hide this.</p>`
 
   const find = <T extends HTMLElement>(id: string) => root.querySelector<T>(`#${id}`)!
   const coins = find('hud-coins')
+  const rate = find('hud-rate')
+  const stars = find('hud-stars')
   const jars = find('hud-jars')
   const found = find('hud-found')
   const canBuy = find('hud-can-buy')
   const toasts = find('hud-toasts')
   const pops = find('hud-pops')
   const hint = find('hud-hint')
+  const rush = find('hud-rush')
+  const rushLabel = find('hud-rush-label')
+  const rushFill = find('hud-rush-fill')
+  const ordersDone = find('hud-orders-done')
+  const orderList = find('hud-order-list')
+  const starHave = find('hud-star-have')
+  const starFill = find('hud-star-fill')
+  const starNext = find('hud-star-next')
+  const prestige = find<HTMLButtonElement>('hud-prestige')
+  const bonus = find('hud-bonus')
+
+  const pop = (x: number, y: number, text: string, tone: PopTone) => {
+    if (root.hidden || (tone === 'tip' && pops.childElementCount >= MAX_POPS)) return
+    const el = document.createElement('span')
+    el.className = `pop pop-${tone}`
+    el.textContent = text
+    el.style.left = `${x}px`
+    el.style.top = `${y}px`
+    el.addEventListener('animationend', () => el.remove())
+    pops.append(el)
+  }
 
   // Panels: one open at a time.
   const panels = [
@@ -100,22 +163,35 @@ export function createHud(root: HTMLElement, actions: HudActions, labels: HudLab
   relabel('hud-quality', actions.toggleQuality)
   find('hud-view').addEventListener('click', () => actions.toggleView())
 
-  // Start over asks twice.
+  /** A button that does something hard to undo asks twice: the first click only changes its label for a few seconds. */
+  const askTwice = (button: HTMLButtonElement, warning: string, act: () => void, relabelAfter: () => void) => {
+    let armed = false
+    button.addEventListener('click', () => {
+      if (armed) {
+        armed = false
+        return act()
+      }
+      armed = true
+      button.textContent = warning
+      setTimeout(() => {
+        if (!armed) return
+        armed = false
+        relabelAfter()
+      }, 4000)
+    })
+    return () => armed
+  }
   const reset = find<HTMLButtonElement>('hud-reset')
-  let armed = false
-  reset.addEventListener('click', () => {
-    if (armed) return actions.reset()
-    armed = true
-    reset.textContent = 'Click again to erase all progress'
-    setTimeout(() => {
-      armed = false
-      reset.textContent = 'Start over'
-    }, 4000)
-  })
+  askTwice(reset, 'Click again to erase all progress', actions.reset, () => (reset.textContent = 'Start over'))
+  let prestigeShown = ''
+  const prestigeArmed = askTwice(prestige, 'Click again: coins and upgrades start again', () => {
+    actions.prestige()
+    prestigeShown = ''
+  }, () => (prestigeShown = ''))
 
   window.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') show(null)
-    else if (event.key.toLowerCase() === 'h' && !event.ctrlKey && !event.metaKey && !event.altKey) root.hidden = !root.hidden
+    else if (event.key.toLowerCase() === 'h' && !event.repeat && !event.ctrlKey && !event.metaKey && !event.altKey) root.hidden = !root.hidden
   })
 
   // Upgrade cards, built once and then kept up to date.
@@ -139,6 +215,33 @@ export function createHud(root: HTMLElement, actions: HudActions, labels: HudLab
     return { upgrade, card, level: card.querySelector<HTMLElement>('.upgrade-level')!, cost: card.querySelector<HTMLElement>('.upgrade-cost')!, shown: '' }
   })
 
+  // Order cards, one for each place on the board.
+  const orderCards: { card: HTMLButtonElement; shown: string; parts: Record<'dot' | 'full' | 'short' | 'reward' | 'fill' | 'count', HTMLElement> }[] = []
+  const addOrderCard = (slot: number) => {
+    const card = document.createElement('button')
+    card.type = 'button'
+    card.className = 'order'
+    card.disabled = true
+    card.innerHTML = `
+      <span class="order-name"><i class="order-dot" hidden></i><span class="order-full"></span><span class="order-short"></span></span>
+      <span class="order-reward"><span class="coin" aria-hidden="true"></span><b></b></span>
+      <span class="order-track"><span class="order-fill"></span></span>
+      <span class="order-count"></span>`
+    card.addEventListener('click', () => {
+      const paid = actions.claim(slot)
+      if (paid === null) return
+      const box = card.getBoundingClientRect()
+      pop(box.left + box.width / 2, box.top + box.height / 2, `+${compact(paid)}`, 'coin')
+    })
+    orderList.append(card)
+    const part = <T extends HTMLElement>(selector: string) => card.querySelector<T>(selector)!
+    orderCards.push({
+      card,
+      shown: '',
+      parts: { dot: part('.order-dot'), full: part('.order-full'), short: part('.order-short'), reward: part('.order-reward b'), fill: part('.order-fill'), count: part('.order-count') },
+    })
+  }
+
   // Collection cells, one per marble.
   const grid = find('hud-marble-grid')
   const cells = RARES.map((kind) => {
@@ -148,15 +251,25 @@ export function createHud(root: HTMLElement, actions: HudActions, labels: HudLab
       <span class="marble-ball" style="background-image:url(${paintMarble(kind, 128).toDataURL()})"></span>
       <span class="marble-name">${kind.name}</span>
       <span class="marble-tier">${TIER_NAME[kind.tier]}</span>
+      <span class="marble-rank" aria-hidden="true">${MASTERY_AT.map(() => '<i></i>').join('')}</span>
       <span class="marble-count"></span>`
     grid.append(cell)
-    return { kind, cell, count: cell.querySelector<HTMLElement>('.marble-count')!, shown: -1 }
+    return { kind, cell, count: cell.querySelector<HTMLElement>('.marble-count')!, pips: [...cell.querySelectorAll<HTMLElement>('.marble-rank i')], shown: -1 }
   })
 
   let coinsShown = -1
   let coinsText = ''
   let jarsShown = -1
   let foundShown = -1
+  let starsShown = -1
+  let doneShown = -1
+  let bonusShown = ''
+  let rushShown = ''
+  let rateShown = ''
+  let workshopShown = ''
+  // Coins ever earned, sampled once a second, oldest first.
+  let samples: number[] = []
+  let sampleClock = 0
 
   return {
     update(state, dt) {
@@ -164,11 +277,69 @@ export function createHud(root: HTMLElement, actions: HudActions, labels: HudLab
       if (coinsShown < 0) coinsShown = state.coins
       const gap = state.coins - coinsShown
       coinsShown = Math.abs(gap) < 0.5 ? state.coins : coinsShown + gap * Math.min(1, dt * 9)
-      const text = number(coinsShown)
+      const text = compact(coinsShown)
       if (text !== coinsText) coins.textContent = coinsText = text
 
-      if (state.shelved !== jarsShown) jars.textContent = number((jarsShown = state.shelved))
+      if (state.shelved !== jarsShown) jars.textContent = compact((jarsShown = state.shelved))
 
+      // Coins a minute, over the last half minute.
+      sampleClock += dt
+      if (sampleClock >= 1 || samples.length === 0) {
+        sampleClock = 0
+        samples.push(state.earned)
+        if (samples.length > RATE_WINDOW + 1) samples.shift()
+        const perMinute = samples.length > 5 ? ((state.earned - samples[0]) / (samples.length - 1)) * 60 : 0
+        const rateText = perMinute > 0 ? `+${compact(perMinute)}/min` : ''
+        if (rateText !== rateShown) {
+          rate.textContent = rateShown = rateText
+          rate.hidden = rateText === ''
+        }
+      }
+
+      if (state.stars !== starsShown) {
+        starsShown = state.stars
+        stars.hidden = state.stars === 0
+        stars.textContent = `★ ${compact(state.stars)}`
+        stars.title = `${compact(state.stars)} stars: ${percent(state.stars * state.config.starBonus)} coins`
+      }
+
+      // The rush meter fills with hand work, then runs down while the rush lasts.
+      const rushing = state.rushLeft > 0
+      const filled = rushing ? state.rushLeft / rushSeconds(state) : state.rushCharge / state.config.rushHits
+      const rushText = rushing ? `Rush ×${state.config.rushPay} · ${Math.ceil(state.rushLeft)}s` : 'Rush'
+      const rushSignature = `${rushText}|${Math.round(filled * 200)}`
+      if (rushSignature !== rushShown) {
+        rushShown = rushSignature
+        rushLabel.textContent = rushText
+        rushFill.style.width = `${Math.min(100, filled * 100).toFixed(1)}%`
+        rush.classList.toggle('on', rushing)
+        root.classList.toggle('rushing', rushing)
+      }
+
+      // Orders.
+      while (orderCards.length < state.orders.length) addOrderCard(orderCards.length)
+      state.orders.forEach((order, slot) => {
+        const entry = orderCards[slot]
+        const ready = order.have >= order.need
+        const reward = orderReward(state, order)
+        const signature = `${order.kind}|${order.colour}|${order.need}|${order.have}|${reward}`
+        if (signature === entry.shown) return
+        entry.shown = signature
+        const words = orderWords(order)
+        entry.parts.full.textContent = words.full
+        entry.parts.short.textContent = words.short
+        entry.parts.dot.hidden = order.kind !== 'colour'
+        if (order.colour) entry.parts.dot.style.background = `#${COLOUR_HEX[order.colour].toString(16).padStart(6, '0')}`
+        entry.parts.reward.textContent = compact(reward)
+        entry.parts.fill.style.width = `${((order.have / order.need) * 100).toFixed(1)}%`
+        entry.parts.count.textContent = ready ? 'Claim' : `${compact(order.have)} / ${compact(order.need)}`
+        entry.card.disabled = !ready
+        entry.card.classList.toggle('ready', ready)
+        entry.card.setAttribute('aria-label', `${words.full}. ${ready ? 'Finished. Claim' : `${order.have} of ${order.need}. Pays`} ${compact(reward)} coins`)
+      })
+      if (state.ordersDone !== doneShown) ordersDone.textContent = (doneShown = state.ordersDone) > 0 ? `${compact(doneShown)} done` : ''
+
+      // Upgrades.
       let affordable = false
       for (const entry of cards) {
         const cost = upgradeCost(state, entry.upgrade.id)
@@ -178,35 +349,57 @@ export function createHud(root: HTMLElement, actions: HudActions, labels: HudLab
         const signature = `${level}|${can}`
         if (signature === entry.shown) continue
         entry.shown = signature
-        entry.level.textContent = entry.upgrade.maxLevel === 1 ? (level ? 'Fitted' : 'Not fitted') : `Level ${level} of ${entry.upgrade.maxLevel}`
-        entry.cost.innerHTML = cost === null ? 'Complete' : `<span class="coin" aria-hidden="true"></span>${number(cost)}`
+        const top = entry.upgrade.maxLevel
+        entry.level.textContent = top === 1 ? (level ? 'Fitted' : 'Not fitted') : top > SHOW_TOP_LEVEL_TO ? `Level ${level}` : `Level ${level} of ${top}`
+        entry.cost.innerHTML = cost === null ? 'Complete' : `<span class="coin" aria-hidden="true"></span>${compact(cost)}`
         entry.card.disabled = !can
         entry.card.classList.toggle('complete', cost === null)
       }
-      canBuy.hidden = !affordable
 
+      // The new workshop: stars held, and how far this run is toward the next one.
+      const waiting = starsWaiting(state)
+      const goal = nextStarAt(state)
+      const from = waiting ** 2 * state.config.starCoins
+      const toward = Math.max(0, Math.min(1, (state.runEarned - from) / (goal - from)))
+      const workshopSignature = `${state.stars}|${waiting}|${compact(state.runEarned)}|${Math.round(toward * 100)}`
+      if (workshopSignature !== workshopShown) {
+        workshopShown = workshopSignature
+        starHave.textContent = state.stars > 0
+          ? `★ ${compact(state.stars)} ${state.stars === 1 ? 'star' : 'stars'}: every payment is ${percent(state.stars * state.config.starBonus)}.`
+          : `Each star adds ${Math.round(state.config.starBonus * 100)}% to every payment, for good.`
+        starFill.style.width = `${(toward * 100).toFixed(1)}%`
+        starNext.textContent = `This workshop has earned ${compact(state.runEarned)}. The next star comes at ${compact(goal)}.`
+      }
+      canBuy.hidden = !affordable && waiting === 0
+      const prestigeText = waiting > 0 ? `Open a new workshop: +${compact(waiting)} ★` : 'No star earned yet'
+      if (!prestigeArmed() && prestigeText !== prestigeShown) {
+        prestige.textContent = prestigeShown = prestigeText
+        prestige.disabled = waiting === 0
+      }
+
+      // Marbles.
       let kinds = 0
       for (const entry of cells) {
         const owned = state.collection[entry.kind.id] ?? 0
         if (owned > 0) kinds++
         if (owned === entry.shown) continue
         entry.shown = owned
+        const rank = masteryRank(owned)
         entry.cell.classList.toggle('found', owned > 0)
-        entry.count.textContent = owned > 0 ? `×${number(owned)}` : 'Not found yet'
+        entry.cell.dataset.rank = String(rank)
+        entry.pips.forEach((pip, index) => pip.classList.toggle('on', index < rank))
+        entry.count.textContent = owned === 0
+          ? MASTERY_NAME[0]
+          : rank < MASTERY_AT.length
+            ? `×${compact(owned)} · ${MASTERY_NAME[rank + 1]} at ${MASTERY_AT[rank]}`
+            : `×${compact(owned)} · ${MASTERY_NAME[rank]}`
       }
       if (kinds !== foundShown) found.textContent = `${(foundShown = kinds)}/${RARES.length}`
+      const bonusText = `Collection bonus: ${percent(collectionBonus(state))} coins`
+      if (bonusText !== bonusShown) bonus.textContent = bonusShown = bonusText
     },
 
-    pop(x, y, text, tone) {
-      if (root.hidden || (tone === 'tip' && pops.childElementCount >= MAX_POPS)) return
-      const pop = document.createElement('span')
-      pop.className = `pop pop-${tone}`
-      pop.textContent = text
-      pop.style.left = `${x}px`
-      pop.style.top = `${y}px`
-      pop.addEventListener('animationend', () => pop.remove())
-      pops.append(pop)
-    },
+    pop,
 
     toast(title, body, kind) {
       const toast = document.createElement('div')
@@ -220,6 +413,10 @@ export function createHud(root: HTMLElement, actions: HudActions, labels: HudLab
       })
       toasts.append(toast)
       while (toasts.childElementCount > 3) toasts.firstElementChild!.remove()
+    },
+
+    settle() {
+      samples = []
     },
   }
 }

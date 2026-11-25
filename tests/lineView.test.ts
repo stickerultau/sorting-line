@@ -19,6 +19,9 @@ const silentAudio: LineAudio = {
   bonus() {},
   rare() {},
   buy() {},
+  order() {},
+  rush() {},
+  star() {},
 }
 
 function bareSet(config: SimConfig): LineSet {
@@ -124,7 +127,7 @@ describe('LineView', () => {
     view.handle(flick(state, 1))
     for (let t = 0; t < 3; t += 1 / 32) view.update(state, 1 / 32)
     expect(rareMeshes(scene)).toHaveLength(0)
-    expect(pops).toEqual(['+1000'])
+    expect(pops).toEqual(['+600'])
   })
 
   it('fills every shelf place when the line resumes with many jars', () => {

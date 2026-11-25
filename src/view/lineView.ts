@@ -3,6 +3,7 @@ import { COLOUR_HEX, RARES, type ColourId, type FamilyId, type RareId, type SimC
 import { beltSpeed } from '../sim/sim'
 import type { BeltItem, SimEvent, SimState } from '../sim/types'
 import type { LineAudio } from './audio'
+import { compact } from './format'
 import { ItemPool } from './itemPool'
 import { JAR, SHELF_PLACES, jarSlot, shelfSlot, type Orientation } from './layout'
 import { REST_Y, TABLE_Y, type LineSet, type Models } from './models'
@@ -352,7 +353,7 @@ export class LineView {
       this.release(visual)
       return
     }
-    if (coins > 0) this.fx.pop(visual.pos, `+${coins}`, 'tip')
+    if (coins > 0) this.fx.pop(visual.pos, `+${compact(coins)}`, 'tip')
 
     const place = jarSlot(slot)
     const local = new THREE.Vector3(place.x, place.y, place.z)
@@ -413,7 +414,7 @@ export class LineView {
       done: () => {
         if (!this.silent) this.audio.tock()
         const rim = jar.pos.clone().setY(jar.pos.y + JAR.height)
-        if (coins > 0) this.fx.pop(rim, `+${coins}`, 'coin')
+        if (coins > 0) this.fx.pop(rim, `+${compact(coins)}`, 'coin')
         this.sparks.burst(rim, GOLD, 10, 1.6, 2.2)
         this.sparks.burst(rim, colour, 8, 1.3, 2.2)
         const from = jar.pos.clone()
@@ -474,7 +475,7 @@ export class LineView {
     const from = visual.pos.clone()
     const to = from.clone().add(new THREE.Vector3(0, byHand ? 1.7 : 1.1, 0.9))
     const size = visual.scale
-    this.fx.pop(from, `+${coins}`, 'rare')
+    this.fx.pop(from, `+${compact(coins)}`, 'rare')
     this.sparks.burst(from, glow, 26, 2.6, 4)
     this.sparks.burst(from, GOLD, 14, 1.8, 3)
     if (!this.silent) this.audio.rare(kind.tier)

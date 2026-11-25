@@ -52,7 +52,7 @@ export const feedInterval = (state: SimState) => state.config.feedInterval * 0.9
 const lidFactor = (state: SimState) => 1 + 0.2 * state.upgrades.lids
 export const jarValue = (state: SimState) => Math.round(state.config.jarCoins * lidFactor(state))
 export const rareChance = (state: SimState) =>
-  state.config.rareChance * (1 + 0.25 * state.upgrades.luck) * (state.rushLeft > 0 ? RUSH_RARE : 1)
+  state.config.rareChance * (1 + 0.15 * state.upgrades.luck) * (state.rushLeft > 0 ? RUSH_RARE : 1)
 export const rushSeconds = (state: SimState) => state.config.rushSeconds + 2 * state.upgrades.rush
 
 /** The rank of a marble caught this many times: 0 not found, then found, bronze, silver, gold. */
@@ -170,10 +170,10 @@ function newOrder(state: SimState, others: Order[]): Order {
   }
   if (kind === 'hand') {
     const need = Math.round((minutes * 12) / 5) * 5
-    return { kind, need, have: 0, worth: need * 0.4 }
+    return { kind, need, have: 0, worth: need * 0.12 }
   }
   const need = minutes < 2.5 ? 1 : 2
-  return { kind, need, have: 0, worth: need * 8 }
+  return { kind, need, have: 0, worth: need * 4 }
 }
 
 /** Counts work toward every order that asks for it. `events` hears about each order this finishes. */

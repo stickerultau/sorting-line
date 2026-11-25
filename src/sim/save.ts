@@ -48,7 +48,7 @@ export function toSave(state: SimState, now: number): SaveData {
 }
 
 /** No real line reaches this. Counts stay far below the size where adding one stops changing a number. */
-const MAX_COUNT = 1e12
+const MAX_COUNT = 1e15
 
 /** A whole number from 0 to `max`. Anything else stored there becomes 0. */
 function count(value: unknown, max = MAX_COUNT): number {

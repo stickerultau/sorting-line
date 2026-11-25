@@ -31,18 +31,18 @@ export const TIER_NAME: Record<RareKind['tier'], string> = { 1: 'Uncommon', 2: '
 export const TIER_WEIGHT: Record<RareKind['tier'], number> = { 1: 6, 2: 3, 3: 1 }
 
 export const RARES: RareKind[] = [
-  { id: 'catseye', name: 'Cat’s Eye', tier: 1, coins: 40, palette: ['#d9f2e6', '#1f9d6b', '#f4d35e'], pattern: 'vane' },
-  { id: 'candy', name: 'Candy Swirl', tier: 1, coins: 40, palette: ['#f7f3ea', '#e4374a', '#2a78e4'], pattern: 'swirl' },
-  { id: 'clambroth', name: 'Clambroth', tier: 1, coins: 40, palette: ['#f3ead8', '#3d7fc4', '#c0563f'], pattern: 'bands' },
-  { id: 'agate', name: 'Agate', tier: 1, coins: 40, palette: ['#b8632e', '#f1d9b5', '#6b3415'], pattern: 'bands' },
-  { id: 'onionskin', name: 'Onionskin', tier: 1, coins: 40, palette: ['#f2e6c9', '#d6452b', '#2f8f5b'], pattern: 'streak' },
-  { id: 'oxblood', name: 'Oxblood', tier: 2, coins: 150, palette: ['#201c1c', '#a01424', '#e9e2d0'], pattern: 'swirl' },
-  { id: 'sunburst', name: 'Sunburst', tier: 2, coins: 150, palette: ['#ffb21f', '#ff5a1f', '#fff1b8'], pattern: 'vane' },
-  { id: 'opal', name: 'Opal', tier: 2, coins: 150, palette: ['#e8f1f4', '#7ad6c9', '#f2a6d0'], pattern: 'nebula' },
-  { id: 'goldstone', name: 'Goldstone', tier: 2, coins: 150, palette: ['#3a1d12', '#f0b54a', '#ffe9b0'], pattern: 'speckle' },
-  { id: 'galaxy', name: 'Galaxy', tier: 3, coins: 500, palette: ['#0b1030', '#5a4fd6', '#ff7ad1'], pattern: 'nebula' },
-  { id: 'comet', name: 'Comet', tier: 3, coins: 500, palette: ['#081a2b', '#7fe3ff', '#ffffff'], pattern: 'swirl' },
-  { id: 'aurora', name: 'Aurora', tier: 3, coins: 500, palette: ['#06231f', '#35f0a0', '#8a6bff'], pattern: 'nebula' },
+  { id: 'catseye', name: 'Cat’s Eye', tier: 1, coins: 25, palette: ['#d9f2e6', '#1f9d6b', '#f4d35e'], pattern: 'vane' },
+  { id: 'candy', name: 'Candy Swirl', tier: 1, coins: 25, palette: ['#f7f3ea', '#e4374a', '#2a78e4'], pattern: 'swirl' },
+  { id: 'clambroth', name: 'Clambroth', tier: 1, coins: 25, palette: ['#f3ead8', '#3d7fc4', '#c0563f'], pattern: 'bands' },
+  { id: 'agate', name: 'Agate', tier: 1, coins: 25, palette: ['#b8632e', '#f1d9b5', '#6b3415'], pattern: 'bands' },
+  { id: 'onionskin', name: 'Onionskin', tier: 1, coins: 25, palette: ['#f2e6c9', '#d6452b', '#2f8f5b'], pattern: 'streak' },
+  { id: 'oxblood', name: 'Oxblood', tier: 2, coins: 90, palette: ['#201c1c', '#a01424', '#e9e2d0'], pattern: 'swirl' },
+  { id: 'sunburst', name: 'Sunburst', tier: 2, coins: 90, palette: ['#ffb21f', '#ff5a1f', '#fff1b8'], pattern: 'vane' },
+  { id: 'opal', name: 'Opal', tier: 2, coins: 90, palette: ['#e8f1f4', '#7ad6c9', '#f2a6d0'], pattern: 'nebula' },
+  { id: 'goldstone', name: 'Goldstone', tier: 2, coins: 90, palette: ['#3a1d12', '#f0b54a', '#ffe9b0'], pattern: 'speckle' },
+  { id: 'galaxy', name: 'Galaxy', tier: 3, coins: 300, palette: ['#0b1030', '#5a4fd6', '#ff7ad1'], pattern: 'nebula' },
+  { id: 'comet', name: 'Comet', tier: 3, coins: 300, palette: ['#081a2b', '#7fe3ff', '#ffffff'], pattern: 'swirl' },
+  { id: 'aurora', name: 'Aurora', tier: 3, coins: 300, palette: ['#06231f', '#35f0a0', '#8a6bff'], pattern: 'nebula' },
 ]
 
 /** Catches of one marble needed for each rank: found, bronze, silver, gold. */
@@ -67,15 +67,16 @@ export interface Upgrade {
   maxLevel: number
 }
 
-// First-pass prices. They make the loop playable; they are not balanced yet.
+// Prices were set against a simulated day of play (see the README). The lids have no real top level:
+// they are where coins go once the rest is bought, and each new workshop gets a little further up them.
 export const UPGRADES: Upgrade[] = [
-  { id: 'feeder', name: 'Quicker feeder', blurb: 'Items drop onto the belt 10% faster.', baseCost: 80, growth: 1.65, maxLevel: 8 },
-  { id: 'belt', name: 'Faster belt', blurb: 'The belt runs 12% faster, so it can carry more.', baseCost: 60, growth: 1.6, maxLevel: 8 },
-  { id: 'lids', name: 'Better lids', blurb: 'Every full jar pays 20% more.', baseCost: 120, growth: 1.7, maxLevel: 10 },
-  { id: 'luck', name: 'Lucky chute', blurb: 'Rare marbles turn up 25% more often.', baseCost: 200, growth: 1.8, maxLevel: 6 },
-  { id: 'spotter', name: 'Spotter arm', blurb: 'Catches rare marbles you miss, for the plain price.', baseCost: 1500, growth: 1, maxLevel: 1 },
-  { id: 'orders', name: 'Order book', blurb: 'Orders pay 10% more.', baseCost: 300, growth: 1.6, maxLevel: 10 },
-  { id: 'rush', name: 'Longer rush', blurb: 'A rush lasts 2 seconds longer.', baseCost: 400, growth: 2, maxLevel: 5 },
+  { id: 'feeder', name: 'Quicker feeder', blurb: 'Items drop onto the belt 10% faster.', baseCost: 100, growth: 2.1, maxLevel: 8 },
+  { id: 'belt', name: 'Faster belt', blurb: 'The belt runs 12% faster, so it can carry more.', baseCost: 80, growth: 1.9, maxLevel: 8 },
+  { id: 'lids', name: 'Better lids', blurb: 'Jars, tips and marbles pay 20% more.', baseCost: 120, growth: 1.25, maxLevel: 200 },
+  { id: 'luck', name: 'Lucky chute', blurb: 'Rare marbles turn up 15% more often.', baseCost: 250, growth: 2, maxLevel: 6 },
+  { id: 'spotter', name: 'Spotter arm', blurb: 'Catches rare marbles you miss, for the plain price.', baseCost: 2500, growth: 1, maxLevel: 1 },
+  { id: 'orders', name: 'Order book', blurb: 'Orders pay 10% more.', baseCost: 300, growth: 1.7, maxLevel: 10 },
+  { id: 'rush', name: 'Longer rush', blurb: 'A rush lasts 2 seconds longer.', baseCost: 400, growth: 2.2, maxLevel: 5 },
 ]
 
 export interface SimConfig {
@@ -134,14 +135,14 @@ export const DEFAULT_CONFIG: SimConfig = {
   ],
   families: ['marble', 'button'],
   jarCoins: 10,
-  handTip: 2,
-  rareChance: 1 / 140,
+  handTip: 1,
+  rareChance: 1 / 200,
   maxRares: 3,
   awayRate: 0.5,
   awayCapSeconds: 8 * 3600,
   orderSlots: 3,
-  rushHits: 30,
-  rushSeconds: 12,
+  rushHits: 40,
+  rushSeconds: 10,
   rushPay: 3,
   starCoins: 10_000,
   starBonus: 0.15,

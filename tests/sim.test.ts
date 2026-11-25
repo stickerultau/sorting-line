@@ -111,7 +111,7 @@ describe('recycling, hand flick and invariants', () => {
     const s = createSim(QUIET, 1)
     s.items.push(redMarble(99, 2))
     expect(flick(s, 99)).toEqual([
-      { type: 'sorted', item: expect.objectContaining({ id: 99 }), station: 0, slot: 0, byHand: true, coins: 2 },
+      { type: 'sorted', item: expect.objectContaining({ id: 99 }), station: 0, slot: 0, byHand: true, coins: 1 },
     ])
     expect(s.items).toHaveLength(0)
     expect(s.stations[0].count).toBe(1)

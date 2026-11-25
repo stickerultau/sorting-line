@@ -1,11 +1,12 @@
 import * as THREE from 'three'
 import './style.css'
-import { DEFAULT_CONFIG, RARES, TIER_NAME } from './content/content'
+import { DEFAULT_CONFIG, MASTERY_BONUS, MASTERY_NAME, RARES, TIER_NAME } from './content/content'
 import { parseSave, payAway, resume, toSave, type Away, type SaveData } from './sim/save'
-import { MAX_DT, buy, flick, tick } from './sim/sim'
+import { MAX_DT, buy, claimOrder, flick, masteryRank, prestige, tick } from './sim/sim'
 import type { SimEvent } from './sim/types'
 import { createHud } from './ui/hud'
 import { createAudio } from './view/audio'
+import { compact } from './view/format'
 import { LineView, type LineFx } from './view/lineView'
 import { buildModels, buildSet } from './view/models'
 import { createStage, type Quality } from './view/scene'
@@ -108,6 +109,24 @@ const hud = createHud(
       save()
       return true
     },
+    claim(slot) {
+      const coins = claimOrder(state, slot)
+      if (coins === null) return null
+      audio.unlock()
+      audio.buy()
+      save()
+      return coins
+    },
+    prestige() {
+      const stars = prestige(state)
+      if (stars === 0) return 0
+      audio.unlock()
+      audio.star()
+      const share = Math.round(state.stars * state.config.starBonus * 100)
+      hud.toast('New workshop', `+${compact(stars)} ★ · every payment is now +${share}%`)
+      save()
+      return stars
+    },
     reset() {
       saving = false
       try {
@@ -138,7 +157,7 @@ view.setOrientation(stage.orientation())
 
 // Run the line for a few seconds before the first frame, so the page opens on a working line.
 // Nothing is earned for it: reloading the page must not pay. The spotter arm rests, so no rare marble is used up.
-const before = { coins: state.coins, earned: state.earned, spotter: state.upgrades.spotter }
+const before = { coins: state.coins, earned: state.earned, runEarned: state.runEarned, spotter: state.upgrades.spotter, orders: structuredClone(state.orders) }
 state.upgrades.spotter = 0
 view.silent = true
 for (let t = 0; t < WARM_UP_SECONDS; t += 1 / 32) {
@@ -148,15 +167,28 @@ for (let t = 0; t < WARM_UP_SECONDS; t += 1 / 32) {
 view.silent = false
 state.coins = before.coins
 state.earned = before.earned
+state.runEarned = before.runEarned
+state.orders = before.orders
 state.upgrades.spotter = before.spotter
 
 function apply(events: SimEvent[]): void {
   view.handle(events)
   for (const event of events) {
+    if (event.type === 'orderReady') audio.order()
+    else if (event.type === 'rushStarted') {
+      audio.rush()
+      hud.toast('Rush!', `Everything pays ×${state.config.rushPay} for ${event.seconds} seconds`)
+    }
     if (event.type !== 'caught') continue
     const kind = RARES.find((rare) => rare.id === event.rare)!
     const how = event.byHand ? 'Caught by hand' : 'Caught by the spotter arm'
-    hud.toast(event.first ? `New marble: ${kind.name}` : kind.name, `${TIER_NAME[kind.tier]} · ${how} · +${event.coins} coins`, kind)
+    // A catch that reaches a new rank says so, and what the rank is worth.
+    const owned = state.collection[event.rare] ?? 0
+    const rank = masteryRank(owned)
+    const ranked = rank > masteryRank(owned - 1)
+    const title = event.first ? `New marble: ${kind.name}` : ranked ? `${kind.name}: ${MASTERY_NAME[rank]} rank` : kind.name
+    const lasting = ranked ? ` · +${Math.round(kind.tier * MASTERY_BONUS * 100)}% coins for good` : ''
+    hud.toast(title, `${TIER_NAME[kind.tier]} · ${how} · +${compact(event.coins)} coins${lasting}`, kind)
   }
 }
 
@@ -164,7 +196,8 @@ function welcomeBack(paid: Away): void {
   const hours = Math.floor(paid.seconds / 3600)
   const minutes = Math.floor((paid.seconds % 3600) / 60)
   const gone = hours > 0 ? `${hours} h ${minutes} min` : `${minutes} min`
-  hud.toast('Welcome back', `Away ${gone} · ${paid.jars.toLocaleString('en-US')} jars · +${paid.coins.toLocaleString('en-US')} coins`)
+  hud.toast('Welcome back', `Away ${gone} · ${compact(paid.jars)} jars · +${compact(paid.coins)} coins`)
+  hud.settle()
 }
 if (away) welcomeBack(away)
 
@@ -223,6 +256,7 @@ function frame(now: number): void {
     hud.update(state, dt)
   }
   if (followClock) stage.setHour(clockHour())
-  lineSet.setLamp(stage.render(dt).lamp)
+  // The lamp strip under the shelf comes on for a rush, whatever the hour.
+  lineSet.setLamp(Math.max(stage.render(dt).lamp, state.rushLeft > 0 ? 1 : 0))
 }
 requestAnimationFrame(frame)
