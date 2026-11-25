@@ -71,15 +71,17 @@ export const beltSpeed = (state: SimState) => state.config.beltSpeed * (1 + 0.12
 export const feedInterval = (state: SimState) => state.config.feedInterval * 0.9 ** state.upgrades.feeder
 const lidFactor = (state: SimState) => 1 + 0.2 * state.upgrades.lids
 export const jarValue = (state: SimState) => Math.round(state.config.jarCoins * lidFactor(state))
-export const rareChance = (state: SimState) =>
-  state.config.rareChance * (1 + 0.15 * state.upgrades.luck) * (state.rushLeft > 0 ? RUSH_RARE : 1)
+/** The chance that a new item is a rare marble when no rush is on. */
+const calmRareChance = (state: SimState) => state.config.rareChance * (1 + 0.15 * state.upgrades.luck)
+export const rareChance = (state: SimState) => calmRareChance(state) * (state.rushLeft > 0 ? RUSH_RARE : 1)
 export const rushSeconds = (state: SimState) => state.config.rushSeconds + 2 * state.upgrades.rush
 
 /** The chance that the next new item is a rare marble: the usual chance, climbing once a dry spell has gone on too long. */
 export function rareChanceNow(state: SimState): number {
   const usual = rareChance(state)
   if (usual <= 0) return 0
-  const waits = state.sinceRare * usual
+  // The spell is measured at the calm rate: starting a rush must not turn a middling wait into a sure thing.
+  const waits = state.sinceRare * calmRareChance(state)
   if (waits <= DRY_FROM) return usual
   return Math.min(1, usual + ((1 - usual) * (waits - DRY_FROM)) / (DRY_TO - DRY_FROM))
 }

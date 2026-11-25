@@ -95,7 +95,7 @@ let slowLeft = 0
 /** A short buzz on phones that can. It follows the sound switch: a player who wants quiet wants this off too. */
 const buzz = (ms: number) => {
   // Browsers refuse a buzz before the first real tap, and say so in the console.
-  if (soundOn && 'vibrate' in navigator && navigator.userActivation?.hasBeenActive) navigator.vibrate(ms)
+  if (soundOn && !calm && 'vibrate' in navigator && navigator.userActivation?.hasBeenActive) navigator.vibrate(ms)
 }
 const qualityLabel = (quality: Quality) => (quality === 'high' ? 'Detail: high' : 'Detail: low')
 const hud = createHud(
@@ -185,7 +185,7 @@ view.silent = false
 function giftWords(event: Extract<SimEvent, { type: 'luckyCaught' }>): string {
   const { config } = state
   if (event.gift === 'coins') return `A burst of coins: +${compact(event.coins)}`
-  if (event.gift === 'frenzy') return `Frenzy! Everything pays ×${config.frenzyPay} for ${config.frenzySeconds} seconds`
+  if (event.gift === 'frenzy') return `Frenzy! Jars, tips and marbles pay ×${config.frenzyPay} for ${config.frenzySeconds} seconds`
   if (event.gift === 'shower') return `${config.luckyShower} rare marbles are coming down the belt`
   if (event.gift === 'order') return 'One of your orders is finished. Claim it'
   return `A free level of ${UPGRADES.find((upgrade) => upgrade.id === event.upgrade)?.name ?? 'an upgrade'}`

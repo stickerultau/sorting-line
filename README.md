@@ -4,7 +4,7 @@ A small sorting line: mixed marbles and buttons ride a belt, flippers knock each
 
 Something is always about to happen:
 
-- **Lucky marble (every two to four minutes):** a glowing gold marble drifts along the line for twelve seconds. Click it for one gift: a burst of coins, a frenzy (everything pays five times as much for thirty seconds), a shower of five rare marbles, a finished order or, rarely, a free upgrade level. A missed one costs nothing; another comes.
+- **Lucky marble (every two to four minutes):** a glowing gold marble drifts along the line for twelve seconds. Click it for one gift: a burst of coins, a frenzy (jars, tips and marbles pay five times as much for thirty seconds), a shower of five rare marbles, a finished order or, rarely, a free upgrade level. A missed one costs nothing; another comes.
 - **Sorting chain (seconds):** items sorted by hand in quick succession build a chain. Each one raises the tip, up to five times, and the sound climbs with it. From ten on, the chain fills the rush meter twice as fast. It ends quietly when you stop.
 - **Next-goal line:** one line under the orders always names the nearest thing you are waiting for and about how long it will take.
 
@@ -53,7 +53,9 @@ Then open http://localhost:5173.
 - **Sound on / off:** sound starts after your first click, because browsers block it until then.
 - **H:** hides the overlay for recording. **Esc** closes a panel.
 
-Progress is saved in the browser every ten seconds. The line keeps earning while you are away, at half speed, for up to eight hours, and the jars it fills count toward your orders. **Start over**, at the foot of the upgrades panel, erases it.
+With reduced motion set on the device, there are no flying coins, flashes, slow motion or buzzes; the sparks stay.
+
+Progress is saved in the browser every ten seconds. Rare marbles still on the belt are kept too. The line keeps earning while you are away, at half speed, for up to eight hours, and the jars it fills count toward your orders. **Start over**, at the foot of the upgrades panel, erases it.
 
 Add these to the address:
 
@@ -87,7 +89,7 @@ For TikTok, Shorts and Reels, make the window tall and narrow (9:16). The shelf 
 
 ## Prices
 
-A new player's first minutes are tuned so that something good comes early: the first three orders are short, the first lucky marble comes after ninety seconds, and no dry spell for rare marbles lasts longer than three times the usual wait. A simulated player who catches every lucky marble earns about 40% more than one who catches none.
+A new player's first minutes are tuned so that something good comes early: orders are short until three have been claimed, the first lucky marble comes after ninety seconds, and a line with room for a rare marble never waits longer than three times the usual wait for one. In a simulated two hours, a player who caught every lucky marble earned about 40% more than one who caught none.
 
 Prices were set against a simulated player over eight hours, not against real players. In that run a player who only claims orders buys something about every thirty seconds, finishes an order every one to three minutes, and opens the first new workshop after about eighty minutes; one who also clicks once a second gets there in about fifty. Later workshops take thirty-five to sixty minutes each. Real players will play differently, so treat these as a second pass.
 

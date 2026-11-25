@@ -268,7 +268,8 @@ button:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
 }
 
 .goal {
-  flex: 1 1 auto;
+  /* It gives way to the frenzy chip before the chip drops to a line of its own. */
+  flex: 1 1 130px;
   min-width: 0;
   margin: 0;
   padding: 6px 12px;

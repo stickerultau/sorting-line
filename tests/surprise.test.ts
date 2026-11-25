@@ -181,6 +181,27 @@ describe('the lucky marble', () => {
     }
   })
 
+  it('a free upgrade turns into coins when every upgrade is at its top level', () => {
+    const state = createSim({ ...DEFAULT_CONFIG, rareChance: 0 }, 3)
+    state.upgrades = { feeder: 8, belt: 8, lids: 200, luck: 6, spotter: 1, orders: 10, rush: 5 }
+    const events: SimEvent[] = []
+    giveLucky(state, 'upgrade', events)
+    expect(ofType(events, 'luckyCaught')[0].gift).toBe('coins')
+    expect(state.coins).toBeGreaterThan(0)
+  })
+
+  it('draws its gift from its own numbers, never from the ones that deal the items', () => {
+    const gifts = new Set<LuckyGift>()
+    for (let seed = 1; seed <= 300; seed++) {
+      const state = createSim(DEFAULT_CONFIG, seed * 31)
+      state.luckyLeft = 5
+      const before = state.rng
+      gifts.add(ofType(catchLucky(state), 'luckyCaught')[0].gift)
+      expect(state.rng).toBe(before)
+    }
+    expect(gifts.size).toBe(LUCKY_GIFTS.length)
+  })
+
   it('does not change which items arrive', () => {
     const withLucky = createSim(DEFAULT_CONFIG, 11)
     const without = createSim({ ...DEFAULT_CONFIG, luckyFirst: 1e9 }, 11)
@@ -268,6 +289,17 @@ describe('rare marbles after a dry spell', () => {
     expect(rareChanceNow(state)).toBe(1)
   })
 
+  it('a rush doubles the usual chance but does not cut a dry spell short', () => {
+    const state = createSim(DEFAULT_CONFIG, 3)
+    const usual = rareChance(state)
+    state.sinceRare = 1.5 / usual
+    state.rushLeft = 5
+    expect(rareChance(state)).toBeCloseTo(usual * 2, 9)
+    expect(rareChanceNow(state)).toBeCloseTo(usual * 2, 9)
+    state.sinceRare = 2.5 / usual
+    expect(rareChanceNow(state)).toBeCloseTo(usual * 2 + (1 - usual * 2) / 2, 6)
+  })
+
   it('never keep a working line waiting longer than three usual waits, and stay about as rare as before', () => {
     const state = createSim({ ...DEFAULT_CONFIG, luckyFirst: 1e9 }, 5)
     state.upgrades.spotter = 1 // every rare marble leaves the belt, so the next one can always be dealt
@@ -309,10 +341,18 @@ describe('a new player’s first minutes', () => {
         if (order.kind === 'hand') expect(order.need).toBeLessThanOrEqual(15)
         if (order.kind === 'catch') expect(order.need).toBe(1)
       }
-      state.ordersDone = 3
-      state.orders.forEach((order) => (order.have = order.need))
-      state.orders.forEach((_, slot) => claimOrder(state, slot))
-      for (const order of state.orders) if (order.kind === 'jars') expect(order.need).toBeGreaterThanOrEqual(30)
+      // The orders that replace the first two claims are short as well; from the third claim on they are full size.
+      const fill = (slot: number) => (state.orders[slot].have = state.orders[slot].need)
+      for (const slot of [0, 1]) {
+        fill(slot)
+        claimOrder(state, slot)
+        if (state.orders[slot].kind === 'jars') expect(state.orders[slot].need).toBeLessThanOrEqual(25)
+      }
+      for (const slot of [0, 1, 2]) {
+        fill(slot)
+        claimOrder(state, slot)
+        if (state.orders[slot].kind === 'jars') expect(state.orders[slot].need).toBeGreaterThanOrEqual(30)
+      }
     }
   })
 
@@ -371,6 +411,44 @@ describe('saving the new parts', () => {
     expect(back.bestChain).toBe(31)
     expect(back.sinceRare).toBe(140)
     expect(back.chain).toBe(0)
+  })
+
+  it('keeps the rare marbles still in play through a reload, and holds them back during the rehearsal', () => {
+    const config = { ...DEFAULT_CONFIG, rareChance: 0 }
+    const state = createSim(config, 3)
+    giveLucky(state, 'shower', [])
+    tick(state, 0.25)
+    tick(state, 0.25)
+    expect(state.items.filter((item) => item.rare)).toHaveLength(2) // two on the belt, three still to come
+    const data = parseSave(JSON.parse(JSON.stringify(toSave(state, NOW))))!
+    expect(data.rares).toHaveLength(5)
+
+    const { state: back } = resume(config, 9, data, NOW + 5_000)
+    const rehearsal: SimEvent[] = []
+    warmUp(back, 8, 1 / 32, (events) => rehearsal.push(...events))
+    expect(rehearsal.some((event) => (event.type === 'spawned' && event.item.rare) || event.type === 'caught')).toBe(false)
+    const after = ofType(run(back, 3).map((entry) => entry.event), 'spawned').filter((event) => event.item.rare)
+    expect(after).toHaveLength(5)
+  })
+
+  it('reads only real rare marbles from a save, and not more than could be in play', () => {
+    const raw = JSON.parse(JSON.stringify(toSave(createSim(DEFAULT_CONFIG, 3), NOW)))
+    raw.rares = ['galaxy', 'no-such-marble', 7, ...Array(40).fill('catseye')]
+    const data = parseSave(raw)!
+    expect(data.rares[0]).toBe('galaxy')
+    expect(data.rares.every((rare) => rare === 'galaxy' || rare === 'catseye')).toBe(true)
+    expect(data.rares.length).toBeLessThanOrEqual(DEFAULT_CONFIG.maxRares + DEFAULT_CONFIG.luckyShower * 2)
+    delete raw.rares
+    expect(parseSave(raw)!.rares).toEqual([])
+  })
+
+  it('the rehearsal uses up no rush either', () => {
+    const state = createSim(DEFAULT_CONFIG, 3)
+    state.rushLeft = 9
+    const seen: SimEvent[] = []
+    warmUp(state, 8, 1 / 32, (events) => seen.push(...events))
+    expect(state.rushLeft).toBe(9)
+    expect(seen.some((event) => event.type === 'rushEnded')).toBe(false)
   })
 
   it('gives a save from before them the first lucky marble after a minute and a half', () => {

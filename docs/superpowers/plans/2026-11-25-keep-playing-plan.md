@@ -48,6 +48,13 @@ Goal: longer sessions. Size: medium.
 5. **Next-goal line.** One line under the coins always names the nearest goal and how far away it is. Examples: "Faster belt in 40 s", "Silver Opal: 3 more", "Next star in 12 min".
 6. **Feel.** A full jar gets a burst and a chord. Coins fly to the wallet. A legendary catch gets a short slow-motion moment and a flash. Phones vibrate on a catch where the browser allows it. All of this is switched off for players who ask their device for reduced motion.
 
+Built on 25 November 2026, with these differences from the list above:
+
+- A frenzy multiplies jars, tips and marbles. Orders and the coin gift pay their plain price.
+- The next-goal line sits under the orders, not under the coins.
+- Reduced motion switches off flying coins, flashes, slow motion and buzzes. The sparks stay.
+- Measured with a simulated player over four hours: the wait between two good events was under 15 seconds 95% of the time and 42 seconds at worst. The wait for something to buy or claim was at most 67 seconds for an active player and 230 seconds for an idle one. The longest waits come late in a workshop, when a new one is due.
+
 ## Stage 2: the workshop keeps changing
 
 Goal: new things for two weeks, not 80 minutes. Size: large.

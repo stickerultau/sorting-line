@@ -27,6 +27,8 @@ export interface SaveData {
   frenzyLeft: number
   bestChain: number
   sinceRare: number
+  /** Rare marbles that were on the belt or waiting to be fed. They come back, so a shower is never lost. */
+  rares: RareId[]
 }
 
 export interface Away {
@@ -59,6 +61,7 @@ export function toSave(state: SimState, now: number): SaveData {
     frenzyLeft: state.frenzyLeft,
     bestChain: state.bestChain,
     sinceRare: state.sinceRare,
+    rares: [...state.items, ...state.recycle].flatMap((kind) => (kind.rare ? [kind.rare] : [])),
   }
 }
 
@@ -69,6 +72,9 @@ const MAX_COUNT = 1e15
 function count(value: unknown, max = MAX_COUNT): number {
   return typeof value === 'number' && value > 0 ? Math.min(Math.floor(value), max) : 0
 }
+
+/** More rare marbles than this are never in play at once, even after two showers in a row. */
+const MAX_RARES_KEPT = 13
 
 /** Seconds from 0 up. Anything else stored there becomes 0. */
 function seconds(value: unknown): number {
@@ -128,6 +134,9 @@ export function parseSave(raw: unknown): SaveData | null {
     frenzyLeft: seconds(data.frenzyLeft),
     bestChain: count(data.bestChain),
     sinceRare: count(data.sinceRare),
+    rares: (Array.isArray(data.rares) ? data.rares : [])
+      .filter((rare): rare is RareId => RARES.some((kind) => kind.id === rare))
+      .slice(0, MAX_RARES_KEPT),
     shelved: count(data.shelved),
     sorted: count(data.sorted),
     upgrades,
@@ -181,6 +190,7 @@ export function resume(config: SimConfig, seed: number, data: SaveData | null, n
   state.frenzyLeft = Math.min(data.frenzyLeft, config.frenzySeconds)
   state.bestChain = data.bestChain
   state.sinceRare = data.sinceRare
+  state.recycle.push(...data.rares.map((rare) => ({ family: 'marble' as const, colour: config.stations[0].colour, rare })))
   if (data.orders?.length === config.orderSlots) state.orders = data.orders.map((order) => ({ ...order }))
 
   const away = payAway(state, Math.floor((now - data.savedAt) / 1000))
