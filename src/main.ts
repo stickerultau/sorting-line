@@ -57,6 +57,7 @@ const stage = (() => {
     throw error
   }
 })()
+document.documentElement.dataset.quality = stage.quality()
 const models = buildModels()
 const lineSet = buildSet(models, state.config)
 const audio = createAudio()
@@ -103,6 +104,7 @@ const hud = createHud(
     },
     toggleQuality() {
       stage.setQuality(stage.quality() === 'high' ? 'low' : 'high')
+      document.documentElement.dataset.quality = stage.quality()
       return qualityLabel(stage.quality())
     },
     toggleView: () => stage.toggleView(),
@@ -208,6 +210,17 @@ window.addEventListener('storage', (event) => {
 // For checks from the browser console and automated smoke tests.
 const debug = { state, stage, handSorts: 0 }
 Object.assign(window, { __line: debug })
+
+// `?fps` shows the frame rate and the pixel ratio the scene is drawn at.
+if (params.has('fps')) {
+  const readout = document.createElement('div')
+  readout.className = 'fps'
+  document.body.append(readout)
+  setInterval(() => {
+    const { fps, ratio } = stage.perf()
+    readout.textContent = `${Math.round(fps)} fps · ${ratio.toFixed(2)}×`
+  }, 500)
+}
 
 canvas.addEventListener('pointerdown', (event) => {
   if (event.button !== 0) return

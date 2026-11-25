@@ -42,7 +42,7 @@ Then open http://localhost:5173.
 - **Marbles:** the collection. Twelve kinds in three tiers, each with four ranks.
 - **Time:** follows the clock on your device, or steps through morning, noon, sunset and night.
 - **Change view:** switches between the whole line and a close-up of the three stations.
-- **Detail:** `low` drops the depth blur, the lamp's shadows and the extra pixels of sharp screens. Use it if the game runs slowly.
+- **Detail:** `low` drops the depth blur, the lamp's shadows, the blur behind the overlay and the extra pixels of sharp screens. On either setting the game draws fewer pixels by itself when the machine cannot keep up, and tries the full size again later.
 - **Sound on / off:** sound starts after your first click, because browsers block it until then.
 - **H:** hides the overlay for recording. **Esc** closes a panel.
 
@@ -54,6 +54,7 @@ Add these to the address:
 |---|---|
 | `?hour=22.5` | Starts at that hour of the day (0 to 24) |
 | `?quality=low` | Starts with low detail |
+| `?fps` | Shows the frame rate and the pixel ratio the scene is drawn at |
 | `?fresh` | Plays without reading or writing a save |
 | `?seed=123` | The same seed always deals the same items. Plays without a save, like `?fresh` |
 

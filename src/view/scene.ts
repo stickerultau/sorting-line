@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js'
 import { daylight, type Daylight } from './daylight'
+import { createGovernor } from './governor'
 import { fitDistance, orientationFor, type Orientation } from './layout'
 import { paintGlow, paintWindow } from './marbleArt'
 import { createPost } from './post'
@@ -22,6 +23,8 @@ export interface Stage {
   /** 'low' drops the depth blur and the lamp's shadows, smooths edges less and ignores the extra pixels of sharp screens. */
   setQuality(quality: Quality): void
   quality(): Quality
+  /** Frames a second, smoothed, and the pixel ratio the scene is drawn at now. */
+  perf(): { fps: number; ratio: number }
   /** Advances the light and the dust, then draws a frame. Returns the light now showing. */
   render(dt: number): Daylight
 }
@@ -38,6 +41,8 @@ const FRAMES = {
 const SUN_TARGET = new THREE.Vector3(8.5, 0.6, 0)
 const SUN_DISTANCE = 46
 const LAMP_POWER = 52
+/** Sharp screens are drawn at up to this many pixels per point. Edges are smoothed as well, so more adds cost and little else. */
+const MAX_PIXEL_RATIO = 1.5
 /** Hours of daylight the light moves through per second when the time of day is changed. */
 const GLIDE_HOURS_PER_SECOND = 5
 const DUST = 240
@@ -109,6 +114,11 @@ export function createStage(canvas: HTMLCanvasElement, startQuality: Quality = '
   let wantedHour = 12
   let light = daylight(hour)
   let time = 0
+  /** Draws fewer pixels on a machine that cannot keep up at full size. */
+  const governor = createGovernor()
+  /** Frame length by the clock, smoothed. The `dt` handed to render() is capped, so it cannot show a slow machine. */
+  let frameSeconds = 1 / 60
+  let lastFrameAt = 0
 
   const orientation = () => orientationFor(camera.aspect)
   const showsWholeLine = () => (chosen ? chosen === 'whole' : orientation() === 'wide' && camera.aspect >= 2.6)
@@ -121,7 +131,7 @@ export function createStage(canvas: HTMLCanvasElement, startQuality: Quality = '
     post.setFocus(distance)
   }
 
-  const resize = () => {
+  const fit = () => {
     const width = canvas.clientWidth
     const height = canvas.clientHeight
     if (width === 0 || height === 0) return
@@ -132,14 +142,26 @@ export function createStage(canvas: HTMLCanvasElement, startQuality: Quality = '
     place()
   }
 
+  const pixelRatio = () => (quality === 'high' ? Math.min(window.devicePixelRatio, MAX_PIXEL_RATIO) : 1) * governor.scale()
+  const applyPixelRatio = () => {
+    renderer.setPixelRatio(pixelRatio())
+    post.setPixelRatio(pixelRatio())
+    fit()
+  }
+
   const applyQuality = () => {
-    const ratio = quality === 'high' ? Math.min(window.devicePixelRatio, 2) : 1
-    renderer.setPixelRatio(ratio)
-    post.setPixelRatio(ratio)
+    governor.reset()
     post.setDepthBlur(quality === 'high')
     post.setSamples(quality === 'high' ? 4 : 2)
     lamp.castShadow = quality === 'high'
-    resize()
+    applyPixelRatio()
+  }
+
+  /** A new window size is a new amount of work: the governor starts again from full size. */
+  const resize = () => {
+    if (governor.scale() === 1) return fit()
+    governor.reset()
+    applyPixelRatio()
   }
 
   const applyLight = () => {
@@ -151,6 +173,8 @@ export function createStage(canvas: HTMLCanvasElement, startQuality: Quality = '
     sky.intensity = light.skyPower
     scene.environmentIntensity = light.env
     lamp.intensity = light.lamp * LAMP_POWER
+    // By day the lamp is off: its shadows are not drawn again until it comes on.
+    lamp.shadow.autoUpdate = light.lamp > 0.001
     renderer.toneMappingExposure = light.exposure
     dustMaterial.color.setRGB(...light.sunColour).multiplyScalar(0.5 + light.sunPower * 0.5)
     dustMaterial.opacity = 0.16 + 0.1 * light.sunPower
@@ -180,8 +204,14 @@ export function createStage(canvas: HTMLCanvasElement, startQuality: Quality = '
       applyQuality()
     },
     quality: () => quality,
+    perf: () => ({ fps: 1 / frameSeconds, ratio: renderer.getPixelRatio() }),
     render(dt) {
       time += dt
+      const now = performance.now()
+      const sinceLast = lastFrameAt > 0 ? (now - lastFrameAt) / 1000 : 0
+      lastFrameAt = now
+      if (sinceLast > 0) frameSeconds = sinceLast < 0.5 ? frameSeconds + (sinceLast - frameSeconds) * 0.05 : sinceLast
+      if (governor.frame(sinceLast) !== null) applyPixelRatio()
       // Glide toward the wanted hour the short way round the clock.
       const gap = ((wantedHour - hour + 36) % 24) - 12
       if (gap !== 0) {

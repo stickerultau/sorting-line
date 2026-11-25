@@ -493,6 +493,26 @@ button:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
 
 .pops { position: fixed; inset: 0; }
 
+/* Low detail: no blur behind the overlay. The browser has to blur the picture under every panel on every frame. */
+[data-quality="low"] :is(.bar, .panel, .toast, .hint, .order) {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  background-color: rgba(17, 21, 26, 0.86);
+}
+
+.fps {
+  position: fixed;
+  right: 8px;
+  bottom: 8px;
+  z-index: 2;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.6);
+  font: 12px/1.4 ui-monospace, Consolas, monospace;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+
 [hidden] { display: none !important; }
 
 @keyframes panel-in {

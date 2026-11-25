@@ -91,12 +91,25 @@ function beltTexture(): THREE.CanvasTexture {
   })
 }
 
+/** A closed ring of straight edges. Drawn by hand so the rim and the holes can each have the detail they need. */
+function ring(path: THREE.Path, x: number, y: number, radius: number, edges: number, clockwise: boolean): void {
+  for (let i = 0; i < edges; i++) {
+    const angle = ((clockwise ? -i : i) / edges) * Math.PI * 2
+    const px = x + Math.cos(angle) * radius
+    const py = y + Math.sin(angle) * radius
+    if (i === 0) path.moveTo(px, py)
+    else path.lineTo(px, py)
+  }
+  path.closePath()
+}
+
+/** A four-hole button. Hundreds are on screen at once, so it is kept to a few hundred triangles. */
 function buttonGeometry(): THREE.BufferGeometry {
   const shape = new THREE.Shape()
-  shape.absarc(0, 0, 0.21, 0, Math.PI * 2, false)
+  ring(shape, 0, 0, 0.21, 24, false)
   for (const [x, y] of [[0.07, 0.07], [-0.07, 0.07], [-0.07, -0.07], [0.07, -0.07]]) {
     const hole = new THREE.Path()
-    hole.absarc(x, y, 0.034, 0, Math.PI * 2, true)
+    ring(hole, x, y, 0.034, 8, true)
     shape.holes.push(hole)
   }
   const geometry = new THREE.ExtrudeGeometry(shape, {
@@ -104,8 +117,7 @@ function buttonGeometry(): THREE.BufferGeometry {
     bevelEnabled: true,
     bevelThickness: 0.025,
     bevelSize: 0.025,
-    bevelSegments: 3,
-    curveSegments: 20,
+    bevelSegments: 2,
   })
   geometry.translate(0, 0, -0.03)
   geometry.rotateX(-Math.PI / 2) // lie flat
@@ -164,7 +176,7 @@ export function buildModels(): Models {
     new THREE.MeshPhysicalMaterial({ color: colour, roughness: 0.28, clearcoat: 1, clearcoatRoughness: 0.12 })
   return {
     itemGeometry: {
-      marble: new THREE.SphereGeometry(ITEM_RADIUS, 28, 18),
+      marble: new THREE.SphereGeometry(ITEM_RADIUS, 24, 14),
       button: buttonGeometry(),
     },
     itemMaterial: {
@@ -180,13 +192,21 @@ export function buildModels(): Models {
       [0, 0], [0.5, 0], [0.59, 0.05], [0.62, 0.15], [0.62, JAR.height - 0.24],
       [0.58, JAR.height - 0.13], [0.58, JAR.height - 0.02], [0.61, JAR.height],
     ]),
+    // Glass that is all reflection: a black body, so it adds only its highlights, laid over what is behind it.
+    // True transmission looks a little richer, but makes the renderer draw the whole scene a second time.
     glass: new THREE.MeshPhysicalMaterial({
-      color: 0xffffff,
-      roughness: 0.04,
+      color: 0x000000,
+      roughness: 0.05,
       metalness: 0,
-      transmission: 1,
-      thickness: 0.08,
-      ior: 1.45,
+      clearcoat: 1,
+      clearcoatRoughness: 0.03,
+      envMapIntensity: 1.8,
+      transparent: true,
+      opacity: 0.06,
+      depthWrite: false,
+      blending: THREE.CustomBlending,
+      blendSrc: THREE.OneFactor,
+      blendDst: THREE.OneMinusSrcAlphaFactor,
       side: THREE.DoubleSide,
     }),
     lidGeometry: lathe([[0.66, 0], [0.66, 0.09], [0.62, 0.12], [0.16, 0.13], [0.13, 0.2], [0.09, 0.25], [0, 0.26]]),
@@ -195,7 +215,7 @@ export function buildModels(): Models {
       yellow: enamel(COLOUR_HEX.yellow),
       blue: enamel(COLOUR_HEX.blue),
     },
-    rareGeometry: new THREE.SphereGeometry(ITEM_RADIUS, 48, 32),
+    rareGeometry: new THREE.SphereGeometry(ITEM_RADIUS, 36, 24),
     rareMaterial: rareMaterials(),
     glowMap: CAN_PAINT ? new THREE.CanvasTexture(paintGlow()) : null,
   }
