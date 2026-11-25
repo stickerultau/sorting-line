@@ -132,7 +132,7 @@ export class LineView {
       else if (event.type === 'jarFull') this.onJarFull(event.station, event.shelfIndex, event.coins)
       else if (event.type === 'jarReady') this.onJarReady(event.station)
       else if (event.type === 'caught') this.onCaught(event.item, event.rare, event.byHand, event.coins)
-      else this.onRecycled(event.item)
+      else if (event.type === 'recycled') this.onRecycled(event.item)
     }
   }
 

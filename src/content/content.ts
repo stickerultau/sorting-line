@@ -45,7 +45,17 @@ export const RARES: RareKind[] = [
   { id: 'aurora', name: 'Aurora', tier: 3, coins: 500, palette: ['#06231f', '#35f0a0', '#8a6bff'], pattern: 'nebula' },
 ]
 
-export type UpgradeId = 'belt' | 'feeder' | 'lids' | 'luck' | 'spotter'
+/** Catches of one marble needed for each rank: found, bronze, silver, gold. */
+export const MASTERY_AT = [1, 5, 15, 40]
+export const MASTERY_NAME = ['Not found yet', 'Found', 'Bronze', 'Silver', 'Gold']
+/** Lasting share of extra coins for each rank of a marble, times its tier. */
+export const MASTERY_BONUS = 0.02
+
+/** What an order asks for: full jars, full jars of one colour, items sorted by hand, or rare marbles caught. */
+export type OrderKind = 'jars' | 'colour' | 'hand' | 'catch'
+export const ORDER_KINDS: OrderKind[] = ['jars', 'colour', 'hand', 'catch']
+
+export type UpgradeId = 'belt' | 'feeder' | 'lids' | 'luck' | 'spotter' | 'orders' | 'rush'
 
 export interface Upgrade {
   id: UpgradeId
@@ -64,6 +74,8 @@ export const UPGRADES: Upgrade[] = [
   { id: 'lids', name: 'Better lids', blurb: 'Every full jar pays 20% more.', baseCost: 120, growth: 1.7, maxLevel: 10 },
   { id: 'luck', name: 'Lucky chute', blurb: 'Rare marbles turn up 25% more often.', baseCost: 200, growth: 1.8, maxLevel: 6 },
   { id: 'spotter', name: 'Spotter arm', blurb: 'Catches rare marbles you miss, for the plain price.', baseCost: 1500, growth: 1, maxLevel: 1 },
+  { id: 'orders', name: 'Order book', blurb: 'Orders pay 10% more.', baseCost: 300, growth: 1.6, maxLevel: 10 },
+  { id: 'rush', name: 'Longer rush', blurb: 'A rush lasts 2 seconds longer.', baseCost: 400, growth: 2, maxLevel: 5 },
 ]
 
 export interface SimConfig {
@@ -93,6 +105,18 @@ export interface SimConfig {
   awayRate: number
   /** Time away that still earns, in seconds. */
   awayCapSeconds: number
+  /** Orders on the board at once. */
+  orderSlots: number
+  /** Items sorted by hand that fill the rush meter. A rare marble caught by hand counts as five. */
+  rushHits: number
+  /** Seconds a rush lasts, before upgrades. */
+  rushSeconds: number
+  /** Coins are multiplied by this during a rush. */
+  rushPay: number
+  /** Coins earned in one run that give the first star. Each further star takes more: 4, 9, 16 times this. */
+  starCoins: number
+  /** Lasting share of extra coins for each star. */
+  starBonus: number
 }
 
 export const DEFAULT_CONFIG: SimConfig = {
@@ -115,4 +139,10 @@ export const DEFAULT_CONFIG: SimConfig = {
   maxRares: 3,
   awayRate: 0.5,
   awayCapSeconds: 8 * 3600,
+  orderSlots: 3,
+  rushHits: 30,
+  rushSeconds: 12,
+  rushPay: 3,
+  starCoins: 10_000,
+  starBonus: 0.15,
 }

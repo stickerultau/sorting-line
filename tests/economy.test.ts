@@ -147,9 +147,11 @@ describe('rare marbles', () => {
     const events = run(state, 30)
     const caught = ofType(events, 'caught')
     expect(caught.length).toBeGreaterThan(1)
+    expect(caught[0].coins).toBe(RARES.find((r) => r.id === caught[0].rare)!.coins)
     for (const event of caught) {
       expect(event.byHand).toBe(false)
-      expect(event.coins).toBe(RARES.find((r) => r.id === event.rare)!.coins)
+      // Later catches pay a little more as the collection grows, but never the double paid for a catch by hand.
+      expect(event.coins).toBeLessThan(RARES.find((r) => r.id === event.rare)!.coins * 1.5)
     }
     expect(ofType(events, 'recycled').some((event) => event.item.rare)).toBe(false)
   })
