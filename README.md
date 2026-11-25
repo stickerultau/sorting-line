@@ -55,7 +55,7 @@ Add these to the address:
 | `?hour=22.5` | Starts at that hour of the day (0 to 24) |
 | `?quality=low` | Starts with low detail |
 | `?fresh` | Plays without reading or writing a save |
-| `?seed=123` | The same seed always deals the same items |
+| `?seed=123` | The same seed always deals the same items. Plays without a save, like `?fresh` |
 
 ## Record a clip
 

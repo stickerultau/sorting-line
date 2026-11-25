@@ -10,10 +10,13 @@ import {
   nextStarAt,
   orderReward,
   prestige,
+  rareChance,
   rushSeconds,
   starsWaiting,
+  steadyJarPay,
   tick,
 } from '../src/sim/sim'
+import { warmUp } from '../src/sim/warmup'
 import type { Order, SimEvent, SimState } from '../src/sim/types'
 
 /** A line where nothing arrives by itself, so each test places the items it needs. */
@@ -80,12 +83,14 @@ describe('orders', () => {
     expect(ofType(events, 'orderReady').map((e) => e.slot)).toEqual([0, 1])
   })
 
-  it('pays a finished order when it is claimed and puts a new kind of order in its place', () => {
+  it('pays a finished order when it is claimed and replaces it with a kind that is not on the board', () => {
     const state = createSim(QUIET, 1)
     state.orders = [order('hand', 1, { have: 1, worth: 6 }), order('catch', 1), order('jars', 5)]
     const reward = orderReward(state, state.orders[0])
+    const items = state.rng
     expect(reward).toBe(6 * QUIET.jarCoins)
     expect(claimOrder(state, 0)).toBe(reward)
+    expect(state.rng).toBe(items) // new orders never change which items arrive
     expect(state.coins).toBe(reward)
     expect(state.earned).toBe(reward)
     expect(state.ordersDone).toBe(1)
@@ -138,6 +143,28 @@ describe('rush', () => {
     expect(state.rushLeft).toBe(0)
     const [after] = ofType(fillRedJar(state), 'jarFull')
     expect(after.coins).toBe(FAST.jarCoins)
+  })
+
+  it('triples tips and catches too, and brings rare marbles twice as often', () => {
+    const state = createSim(FAST, 1)
+    const calm = rareChance({ ...state, config: { ...FAST, rareChance: 0.01 } })
+    for (let i = 0; i < 3; i++) sortByHand(state, 'blue')
+    expect(ofType(sortByHand(state), 'sorted')[0].coins).toBe(FAST.handTip * FAST.rushPay)
+    expect(ofType(catchByHand(state, 'oxblood'), 'caught')[0].coins).toBe(90 * 2 * FAST.rushPay)
+    expect(rareChance({ ...state, config: { ...FAST, rareChance: 0.01 } })).toBeCloseTo(calm * 2)
+  })
+
+  it('counts a rare marble caught by hand as five hand sorts', () => {
+    const state = createSim({ ...QUIET, rushHits: 12 }, 1)
+    catchByHand(state)
+    expect(state.rushCharge).toBe(5)
+  })
+
+  it('starts with the longer time once the upgrade is bought', () => {
+    const state = createSim(FAST, 1)
+    state.upgrades.rush = 3
+    for (let i = 0; i < 3; i++) sortByHand(state, 'blue')
+    expect(state.rushLeft).toBe(FAST.rushSeconds + 6)
   })
 
   it('does not fill the next one while it is running', () => {
@@ -202,6 +229,7 @@ describe('a new workshop', () => {
     const state = createSim({ ...QUIET, rushHits: 1 }, 1)
     sortByHand(state)
     Object.assign(state, { coins: 5000, earned: 90_000, runEarned: QUIET.starCoins * 9, stars: 2, shelved: 400, ordersDone: 12 })
+    const oldOrders = state.orders
     state.upgrades.lids = 4
     state.upgrades.spotter = 1
     state.collection.oxblood = 3
@@ -213,11 +241,23 @@ describe('a new workshop', () => {
     expect(state.runEarned).toBe(0)
     expect(Object.values(state.upgrades).every((level) => level === 0)).toBe(true)
     expect(state.rushLeft).toBe(0)
+    expect(state.rushCharge).toBe(0)
+    expect(state.orders).not.toBe(oldOrders)
+    expect(state.orders).toHaveLength(QUIET.orderSlots)
     expect(state.orders.every((o) => o.have === 0)).toBe(true)
     expect(state.earned).toBe(90_000)
     expect(state.shelved).toBe(400)
     expect(state.ordersDone).toBe(12)
     expect(state.collection.oxblood).toBe(3)
+  })
+
+  it('pays finished orders first, so nothing waiting to be claimed is lost', () => {
+    const state = createSim(QUIET, 1)
+    state.runEarned = QUIET.starCoins * 4 - 10 // one star, ten coins short of the second
+    state.orders = [order('hand', 1, { have: 1, worth: 6 }), order('catch', 1), order('jars', 5)]
+    expect(prestige(state)).toBe(2)
+    expect(state.ordersDone).toBe(1)
+    expect(state.earned).toBe(6 * QUIET.jarCoins)
   })
 
   it('changes nothing when no star is waiting', () => {
@@ -270,6 +310,38 @@ describe('saving the all-day loop', () => {
     expect(state.rushCharge).toBeLessThan(DEFAULT_CONFIG.rushHits)
   })
 
+  it('deals new orders whenever one in the save cannot be read', () => {
+    const fine = order('jars', 5)
+    const bad: unknown[] = [
+      'x',
+      [fine, fine],
+      [fine, fine, fine, fine],
+      [fine, fine, null],
+      [fine, fine, { ...fine, need: 0 }],
+      [fine, fine, { ...fine, need: 'many' }],
+      [fine, fine, { ...fine, worth: -1 }],
+      [fine, fine, { ...fine, worth: Number.NaN }],
+      [fine, fine, { ...fine, worth: 1e99 }],
+      [fine, fine, { ...fine, kind: 'colour', colour: '__proto__' }],
+    ]
+    for (const orders of bad) {
+      const { state } = resume(DEFAULT_CONFIG, 1, parseSave({ ...toSave(played(), NOW), orders })!, NOW + 5_000)
+      expect(state.orders, JSON.stringify(orders)).toEqual(createSim(DEFAULT_CONFIG, 1).orders)
+    }
+  })
+
+  it('carries a rush in progress through a reload, and never a longer one than the line can have', () => {
+    const rushing = played()
+    rushing.rushLeft = 6.5
+    const back = resume(DEFAULT_CONFIG, 1, parseSave(JSON.parse(JSON.stringify(toSave(rushing, NOW))))!, NOW + 5_000).state
+    expect(back.rushLeft).toBe(6.5)
+    for (const rushLeft of [1e9, -4, Number.NaN, 'long', null]) {
+      const { state } = resume(DEFAULT_CONFIG, 1, parseSave({ ...toSave(played(), NOW), rushLeft })!, NOW + 5_000)
+      expect(state.rushLeft).toBeGreaterThanOrEqual(0)
+      expect(state.rushLeft).toBeLessThanOrEqual(DEFAULT_CONFIG.rushSeconds)
+    }
+  })
+
   it('repairs progress past the end of an order and a colour that is not on the line', () => {
     const data = parseSave({
       ...toSave(played(), NOW),
@@ -287,6 +359,20 @@ describe('time away and the loop', () => {
     const plain = awayEarnings(state, 3600)
     state.stars = 4
     expect(awayEarnings(state, 3600)).toEqual({ jars: plain.jars, coins: plain.jars * Math.round(DEFAULT_CONFIG.jarCoins * 1.6) })
+    state.collection.galaxy = MASTERY_AT[3] // gold legendary: +24%
+    expect(awayEarnings(state, 3600).coins).toBe(plain.jars * Math.round(DEFAULT_CONFIG.jarCoins * 1.6 * 1.24))
+  })
+
+  it('pays the same for a jar filled while away as for one filled while watching', () => {
+    for (let lids = 0; lids <= 40; lids++) {
+      for (let stars = 0; stars <= 30; stars++) {
+        const state = createSim(QUIET, 1)
+        state.upgrades.lids = lids
+        state.stars = stars
+        const away = steadyJarPay(state)
+        expect(ofType(fillRedJar(state), 'jarFull')[0].coins, `lids ${lids}, stars ${stars}`).toBe(away)
+      }
+    }
   })
 
   it('counts the jars toward orders and the run, so there is something to claim on return', () => {
@@ -295,5 +381,25 @@ describe('time away and the loop', () => {
     const paid = payAway(state, 3600)! // 600 jars, 200 of each colour
     expect(state.orders.map((o) => o.have)).toEqual([50, 200, 0])
     expect(state.runEarned).toBe(paid.coins)
+  })
+})
+
+describe('the warm-up before the first frame', () => {
+  const RARES_EVERYWHERE: SimConfig = { ...DEFAULT_CONFIG, rareChance: 1, startShelved: 0 }
+
+  it('gets the line going without earning, moving an order or dealing a rare marble', () => {
+    const state = createSim(RARES_EVERYWHERE, 3)
+    state.upgrades.spotter = 1
+    const orders = structuredClone(state.orders)
+    let steps = 0
+    warmUp(state, 8, 1 / 32, () => steps++)
+    expect(steps).toBe(8 * 32)
+    expect(state.items.length).toBeGreaterThan(5)
+    expect(state.items.some((item) => item.rare)).toBe(false)
+    expect(state.recycle.some((kind) => kind.rare)).toBe(false)
+    expect(state).toMatchObject({ coins: 0, earned: 0, runEarned: 0, collection: {} })
+    expect(state.orders).toEqual(orders)
+    expect(state.config).toBe(RARES_EVERYWHERE) // and the line deals rare marbles again afterwards
+    expect(state.upgrades.spotter).toBe(1)
   })
 })

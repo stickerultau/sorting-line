@@ -3,6 +3,7 @@ import './style.css'
 import { DEFAULT_CONFIG, MASTERY_BONUS, MASTERY_NAME, RARES, TIER_NAME } from './content/content'
 import { parseSave, payAway, resume, toSave, type Away, type SaveData } from './sim/save'
 import { MAX_DT, buy, claimOrder, flick, masteryRank, prestige, tick } from './sim/sim'
+import { warmUp } from './sim/warmup'
 import type { SimEvent } from './sim/types'
 import { createHud } from './ui/hud'
 import { createAudio } from './view/audio'
@@ -26,8 +27,11 @@ const TIMES: { label: string; hour: number | null }[] = [
 ]
 
 const params = new URLSearchParams(location.search)
-/** `?fresh` plays without reading or writing a save. */
-const fresh = params.has('fresh')
+/**
+ * `?fresh` plays without reading or writing a save. So does `?seed`: a line that deals the same items
+ * every time is for tests and clips, and must not be a way to collect the same rare marble again and again.
+ */
+const fresh = params.has('fresh') || params.has('seed')
 const seed = Number(params.get('seed')) || (Date.now() & 0x7fffffff)
 const fixedHour = params.has('hour') ? Number(params.get('hour')) : Number.NaN
 
@@ -156,20 +160,12 @@ const view = new LineView(stage.scene, stage.camera, models, lineSet, state.conf
 view.setOrientation(stage.orientation())
 
 // Run the line for a few seconds before the first frame, so the page opens on a working line.
-// Nothing is earned for it: reloading the page must not pay. The spotter arm rests, so no rare marble is used up.
-const before = { coins: state.coins, earned: state.earned, runEarned: state.runEarned, spotter: state.upgrades.spotter, orders: structuredClone(state.orders) }
-state.upgrades.spotter = 0
 view.silent = true
-for (let t = 0; t < WARM_UP_SECONDS; t += 1 / 32) {
-  view.handle(tick(state, 1 / 32))
+warmUp(state, WARM_UP_SECONDS, 1 / 32, (events) => {
+  view.handle(events)
   view.update(state, 1 / 32)
-}
+})
 view.silent = false
-state.coins = before.coins
-state.earned = before.earned
-state.runEarned = before.runEarned
-state.orders = before.orders
-state.upgrades.spotter = before.spotter
 
 function apply(events: SimEvent[]): void {
   view.handle(events)
@@ -177,7 +173,7 @@ function apply(events: SimEvent[]): void {
     if (event.type === 'orderReady') audio.order()
     else if (event.type === 'rushStarted') {
       audio.rush()
-      hud.toast('Rush!', `Everything pays ×${state.config.rushPay} for ${event.seconds} seconds`)
+      hud.toast('Rush!', `Jars, tips and marbles pay ×${state.config.rushPay} for ${event.seconds} seconds`)
     }
     if (event.type !== 'caught') continue
     const kind = RARES.find((rare) => rare.id === event.rare)!

@@ -44,6 +44,8 @@ const MAX_POPS = 26
 const RATE_WINDOW = 30
 /** Upgrades with more levels than this show the level alone, not "of" a top that nobody reaches. */
 const SHOW_TOP_LEVEL_TO = 20
+/** A second click sooner than this after the first is the same double-click, not a confirmation. */
+const CONFIRM_AFTER_MS = 500
 const percent = (share: number) => `+${Math.round(share * 100)}%`
 const capital = (word: string) => word[0].toUpperCase() + word.slice(1)
 
@@ -163,23 +165,29 @@ export function createHud(root: HTMLElement, actions: HudActions, labels: HudLab
   relabel('hud-quality', actions.toggleQuality)
   find('hud-view').addEventListener('click', () => actions.toggleView())
 
-  /** A button that does something hard to undo asks twice: the first click only changes its label for a few seconds. */
+  /**
+   * A button that does something hard to undo asks twice: the first click only changes its label for a few seconds.
+   * The second click must come a moment later, so a double-click counts as one.
+   */
   const askTwice = (button: HTMLButtonElement, warning: string, act: () => void, relabelAfter: () => void) => {
-    let armed = false
+    let armedAt = 0
+    let timer = 0
     button.addEventListener('click', () => {
-      if (armed) {
-        armed = false
+      const now = performance.now()
+      if (armedAt > 0) {
+        if (now - armedAt < CONFIRM_AFTER_MS) return
+        armedAt = 0
+        clearTimeout(timer)
         return act()
       }
-      armed = true
+      armedAt = now
       button.textContent = warning
-      setTimeout(() => {
-        if (!armed) return
-        armed = false
+      timer = window.setTimeout(() => {
+        armedAt = 0
         relabelAfter()
       }, 4000)
     })
-    return () => armed
+    return () => armedAt > 0
   }
   const reset = find<HTMLButtonElement>('hud-reset')
   askTwice(reset, 'Click again to erase all progress', actions.reset, () => (reset.textContent = 'Start over'))
@@ -267,6 +275,7 @@ export function createHud(root: HTMLElement, actions: HudActions, labels: HudLab
   let rushShown = ''
   let rateShown = ''
   let workshopShown = ''
+  let dotShown = false
   // Coins ever earned, sampled once a second, oldest first.
   let samples: number[] = []
   let sampleClock = 0
@@ -307,7 +316,7 @@ export function createHud(root: HTMLElement, actions: HudActions, labels: HudLab
       const rushing = state.rushLeft > 0
       const filled = rushing ? state.rushLeft / rushSeconds(state) : state.rushCharge / state.config.rushHits
       const rushText = rushing ? `Rush ×${state.config.rushPay} · ${Math.ceil(state.rushLeft)}s` : 'Rush'
-      const rushSignature = `${rushText}|${Math.round(filled * 200)}`
+      const rushSignature = `${rushText}|${Math.round(filled * (rushing ? 50 : 200))}`
       if (rushSignature !== rushShown) {
         rushShown = rushSignature
         rushLabel.textContent = rushText
@@ -362,7 +371,7 @@ export function createHud(root: HTMLElement, actions: HudActions, labels: HudLab
       const from = waiting ** 2 * state.config.starCoins
       const toward = Math.max(0, Math.min(1, (state.runEarned - from) / (goal - from)))
       const workshopSignature = `${state.stars}|${waiting}|${compact(state.runEarned)}|${Math.round(toward * 100)}`
-      if (workshopSignature !== workshopShown) {
+      if (!panels[0].panel.hidden && workshopSignature !== workshopShown) {
         workshopShown = workshopSignature
         starHave.textContent = state.stars > 0
           ? `★ ${compact(state.stars)} ${state.stars === 1 ? 'star' : 'stars'}: every payment is ${percent(state.stars * state.config.starBonus)}.`
@@ -370,7 +379,8 @@ export function createHud(root: HTMLElement, actions: HudActions, labels: HudLab
         starFill.style.width = `${(toward * 100).toFixed(1)}%`
         starNext.textContent = `This workshop has earned ${compact(state.runEarned)}. The next star comes at ${compact(goal)}.`
       }
-      canBuy.hidden = !affordable && waiting === 0
+      // The dot on the Upgrades button means only one thing: an upgrade can be bought.
+      if (affordable !== dotShown) canBuy.hidden = !(dotShown = affordable)
       const prestigeText = waiting > 0 ? `Open a new workshop: +${compact(waiting)} ★` : 'No star earned yet'
       if (!prestigeArmed() && prestigeText !== prestigeShown) {
         prestige.textContent = prestigeShown = prestigeText

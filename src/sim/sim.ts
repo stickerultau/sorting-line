@@ -74,7 +74,7 @@ export const steadyMultiplier = (state: SimState) => (1 + state.stars * state.co
 /** The same, with the rush on top while one is running. */
 export const coinMultiplier = (state: SimState) => steadyMultiplier(state) * (state.rushLeft > 0 ? state.config.rushPay : 1)
 /** Coins for a full jar outside a rush. Time away is paid at this price. */
-export const steadyJarPay = (state: SimState) => Math.round(state.config.jarCoins * lidFactor(state) * steadyMultiplier(state))
+export const steadyJarPay = (state: SimState) => Math.round(state.config.jarCoins * (lidFactor(state) * steadyMultiplier(state)))
 
 /** Coins an order pays when it is claimed. It follows the price of a jar, so an old order is never worth less. */
 export const orderReward = (state: SimState, order: Order) =>
@@ -90,8 +90,10 @@ export const nextStarAt = (state: SimState) => (starsWaiting(state) + 1) ** 2 * 
  * Marbles, jars shelved and totals stay. Returns the stars gained; 0, changing nothing, if none is waiting.
  */
 export function prestige(state: SimState): number {
+  if (starsWaiting(state) < 1) return 0
+  // Finished orders are paid first: their coins count toward this run's stars instead of being lost.
+  state.orders.forEach((_, slot) => claimOrder(state, slot))
   const stars = starsWaiting(state)
-  if (stars < 1) return 0
   state.stars += stars
   state.coins = 0
   state.runEarned = 0

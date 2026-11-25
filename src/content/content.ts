@@ -72,7 +72,7 @@ export interface Upgrade {
 export const UPGRADES: Upgrade[] = [
   { id: 'feeder', name: 'Quicker feeder', blurb: 'Items drop onto the belt 10% faster.', baseCost: 100, growth: 2.1, maxLevel: 8 },
   { id: 'belt', name: 'Faster belt', blurb: 'The belt runs 12% faster, so it can carry more.', baseCost: 80, growth: 1.9, maxLevel: 8 },
-  { id: 'lids', name: 'Better lids', blurb: 'Jars, tips and marbles pay 20% more.', baseCost: 120, growth: 1.25, maxLevel: 200 },
+  { id: 'lids', name: 'Better lids', blurb: 'Full jars and rare marbles pay 20% more.', baseCost: 120, growth: 1.25, maxLevel: 200 },
   { id: 'luck', name: 'Lucky chute', blurb: 'Rare marbles turn up 15% more often.', baseCost: 250, growth: 2, maxLevel: 6 },
   { id: 'spotter', name: 'Spotter arm', blurb: 'Catches rare marbles you miss, for the plain price.', baseCost: 2500, growth: 1, maxLevel: 1 },
   { id: 'orders', name: 'Order book', blurb: 'Orders pay 10% more.', baseCost: 300, growth: 1.7, maxLevel: 10 },

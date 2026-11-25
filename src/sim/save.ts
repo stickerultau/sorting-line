@@ -1,5 +1,5 @@
 import { COLOUR_HEX, ORDER_KINDS, RARES, UPGRADES, type ColourId, type OrderKind, type RareId, type SimConfig, type UpgradeId } from '../content/content'
-import { countTowardOrders, createSim, feedInterval, steadyJarPay } from './sim'
+import { countTowardOrders, createSim, feedInterval, rushSeconds, steadyJarPay } from './sim'
 import type { Order, SimState } from './types'
 
 export interface SaveData {
@@ -18,6 +18,8 @@ export interface SaveData {
   /** Null when the save has none that can be read. The line then deals new ones. */
   orders: Order[] | null
   rushCharge: number
+  /** Seconds of a rush still to run. */
+  rushLeft: number
 }
 
 export interface Away {
@@ -44,6 +46,7 @@ export function toSave(state: SimState, now: number): SaveData {
     ordersDone: state.ordersDone,
     orders: state.orders.map((order) => ({ ...order })),
     rushCharge: state.rushCharge,
+    rushLeft: state.rushLeft,
   }
 }
 
@@ -102,6 +105,7 @@ export function parseSave(raw: unknown): SaveData | null {
     ordersDone: count(data.ordersDone),
     orders: parseOrders(data.orders),
     rushCharge: count(data.rushCharge),
+    rushLeft: typeof data.rushLeft === 'number' && data.rushLeft > 0 ? Math.min(data.rushLeft, MAX_COUNT) : 0,
     shelved: count(data.shelved),
     sorted: count(data.sorted),
     upgrades,
@@ -149,6 +153,7 @@ export function resume(config: SimConfig, seed: number, data: SaveData | null, n
   state.runEarned = data.runEarned
   state.ordersDone = data.ordersDone
   state.rushCharge = Math.min(data.rushCharge, config.rushHits - 1)
+  state.rushLeft = Math.min(data.rushLeft, rushSeconds(state))
   if (data.orders?.length === config.orderSlots) state.orders = data.orders.map((order) => ({ ...order }))
 
   const away = payAway(state, Math.floor((now - data.savedAt) / 1000))

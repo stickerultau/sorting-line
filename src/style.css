@@ -172,7 +172,7 @@ html, body {
   transition: opacity 0.5s;
 }
 
-#hud.rushing .rush-glow { opacity: 1; animation: rush-pulse 1.1s ease-in-out infinite alternate; }
+#hud.rushing .rush-glow { opacity: 1; animation: rush-pulse 1.1s 0.5s ease-in-out infinite alternate; }
 #hud.rushing .bar { border-color: rgba(255, 200, 87, 0.7); }
 
 .tools {
@@ -221,8 +221,9 @@ button:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
   width: 272px;
   display: grid;
   gap: 6px;
-  pointer-events: auto;
 }
+
+.order { pointer-events: auto; }
 
 .orders h2 {
   display: flex;
@@ -518,8 +519,8 @@ button:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
 }
 
 @keyframes rush-pulse {
-  from { box-shadow: inset 0 0 130px 20px rgba(255, 170, 50, 0.32); }
-  to { box-shadow: inset 0 0 170px 40px rgba(255, 190, 70, 0.5); }
+  from { opacity: 1; }
+  to { opacity: 0.6; }
 }
 
 @keyframes bought {
@@ -528,18 +529,15 @@ button:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
 }
 
 /* No room for a column of orders: they become a row of three under the bar. */
-@media (max-width: 960px), (max-height: 480px) {
+@media (max-width: 1180px), (max-height: 480px) {
   #hud { grid-template-rows: auto auto minmax(0, 1fr); }
   .orders { grid-area: 2 / 1; justify-self: stretch; width: auto; }
   .orders h2 { display: none; }
   .order-list { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-  .order { gap: 5px 6px; padding: 6px 9px; border-radius: 10px; }
-  .order-full, .order-reward { display: none; }
+  .order { grid-template-columns: minmax(0, 1fr) auto auto; gap: 5px 10px; padding: 6px 10px; border-radius: 10px; }
+  .order-full { display: none; }
   .order-short { display: block; }
   .order-track { grid-column: 1 / -1; grid-row: 2; }
-  /* A finished order is one wide button: there is no room for its name beside the word. */
-  .order.ready .order-name { display: none; }
-  .order.ready .order-count { grid-column: 1 / -1; text-align: center; }
   .panel, .toasts, .hint { grid-area: 3 / 1; }
 }
 
@@ -548,6 +546,11 @@ button:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
   #hud { font-size: 13px; padding: 8px; gap: 8px; }
   .bar { padding: 8px 10px; }
   .wallet-jars { display: none; }
+  .order { grid-template-columns: minmax(0, 1fr) auto; gap: 5px 6px; padding: 6px 9px; }
+  .order-reward { display: none; }
+  /* A finished order is one wide button: there is no room for its name beside the word. */
+  .order.ready .order-name { display: none; }
+  .order.ready .order-count { grid-column: 1 / -1; text-align: center; }
   .rush { flex-basis: 100%; max-width: none; order: 3; grid-template-columns: auto 1fr; align-items: center; gap: 8px; }
   .wallet-coins { font-size: 22px; }
   .tools { gap: 4px; }
