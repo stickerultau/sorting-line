@@ -1,5 +1,7 @@
 import { LUCKY_GIFTS, MASTERY_AT, MASTERY_BONUS, ORDER_KINDS, RARES, TIER_WEIGHT, UPGRADES, type ColourId, type LuckyGift, type OrderKind, type RareId, type SimConfig, type UpgradeId } from '../content/content'
 import { nextRandom } from './rng'
+import { STAMPS } from './stamps'
+import { availableRares, configFor, has, setsComplete } from './unlocks'
 import type { BeltItem, ItemKind, Order, SimEvent, SimState } from './types'
 
 /** Fixed simulation step. A power of two, so whole steps add up without rounding error. */
@@ -7,7 +9,6 @@ export const STEP = 1 / 64
 /** A single tick never advances more than this, so a background tab cannot make the line jump. */
 export const MAX_DT = 0.25
 
-const RARE_WEIGHT_TOTAL = RARES.reduce((sum, rare) => sum + TIER_WEIGHT[rare.tier], 0)
 /** Mixed into the seed for the stream of numbers that orders are drawn from. */
 const ORDER_SEED = 0x5bd1e995
 /** A rare marble caught by hand fills the rush meter as much as this many hand sorts. */
@@ -61,6 +62,11 @@ export function createSim(config: SimConfig, seed: number): SimState {
     chainLeft: 0,
     bestChain: 0,
     sinceRare: 0,
+    handSorted: 0,
+    rareByHand: 0,
+    rushes: 0,
+    workshops: 0,
+    stamps: [],
   }
   dealOrders(state)
   return state
@@ -68,7 +74,12 @@ export function createSim(config: SimConfig, seed: number): SimState {
 
 // What the upgrades do. The view and the away-time sums read the line's speed through these.
 export const beltSpeed = (state: SimState) => state.config.beltSpeed * (1 + 0.12 * state.upgrades.belt)
-export const feedInterval = (state: SimState) => state.config.feedInterval * 0.9 ** state.upgrades.feeder
+export const feedInterval = (state: SimState) =>
+  (state.config.feedInterval * 0.9 ** state.upgrades.feeder) / (has(state, 'twin') ? state.config.twinFeed : 1)
+const maxOnBelt = (state: SimState) => state.config.maxOnBelt * (has(state, 'twin') ? state.config.twinBelt : 1)
+/** How fast an item moves along the belt. The magnet holds rare marbles back. */
+export const itemSpeed = (state: SimState, item: BeltItem) =>
+  beltSpeed(state) * (item.rare && has(state, 'magnet') ? state.config.magnetSlow : 1)
 const lidFactor = (state: SimState) => 1 + 0.2 * state.upgrades.lids
 export const jarValue = (state: SimState) => Math.round(state.config.jarCoins * lidFactor(state))
 /** The chance that a new item is a rare marble when no rush is on. */
@@ -104,15 +115,23 @@ export function collectionBonus(state: SimState): number {
   return bonus
 }
 
-/** What stars and the collection multiply every payment by. It only ever grows. */
-export const steadyMultiplier = (state: SimState) => (1 + state.stars * state.config.starBonus) * (1 + collectionBonus(state))
+/** What stars, marble ranks, full sets and stamps multiply every payment by. It only ever grows. */
+export const steadyMultiplier = (state: SimState) =>
+  (1 + state.stars * state.config.starBonus) *
+  (1 + collectionBonus(state)) *
+  (1 + setsComplete(state) * state.config.setBonus) *
+  (1 + state.stamps.length * state.config.stampBonus)
 /** The same, with a rush and a frenzy on top while they are running. */
 export const coinMultiplier = (state: SimState) =>
   steadyMultiplier(state) * (state.rushLeft > 0 ? state.config.rushPay : 1) * (state.frenzyLeft > 0 ? state.config.frenzyPay : 1)
 /** Coins for a full jar outside a rush. Time away is paid at this price. */
 export const steadyJarPay = (state: SimState) => Math.round(state.config.jarCoins * (lidFactor(state) * steadyMultiplier(state)))
+/** What golden jars add to the pay of a jar on average: 1 without them. */
+export const jarAverage = (state: SimState) =>
+  has(state, 'golden') ? 1 + (state.config.goldenPay - 1) / state.config.goldenEvery : 1
 /** Coins a second from full jars when the line runs without a hitch and nobody helps. */
-export const steadyIncome = (state: SimState) => steadyJarPay(state) / (feedInterval(state) * state.config.jarCapacity)
+export const steadyIncome = (state: SimState) =>
+  (steadyJarPay(state) * jarAverage(state)) / (feedInterval(state) * state.config.jarCapacity)
 
 /** Coins an order pays when it is claimed. It follows the price of a jar, so an old order is never worth less. */
 export const orderReward = (state: SimState, order: Order) =>
@@ -133,6 +152,16 @@ export function prestige(state: SimState): number {
   state.orders.forEach((_, slot) => claimOrder(state, slot))
   const stars = starsWaiting(state)
   state.stars += stars
+  state.workshops++
+  // Stars may have earned a new colour or kind of item: the line is laid out again for them.
+  const config = configFor(state.config, state.stars)
+  if (config !== state.config) {
+    state.config = config
+    state.stations = config.stations.map((s) => ({ x: s.x, colour: s.colour, count: 0, swapLeft: 0 }))
+    // The belt is cleared for the new layout. Rare marbles in play go back in the chute; nothing else is worth keeping.
+    state.recycle = [...state.items, ...state.recycle].filter((kind) => kind.rare).map(({ family, colour, rare }) => ({ family, colour, rare }))
+    state.items = []
+  }
   state.coins = 0
   state.runEarned = 0
   state.upgrades = noUpgrades()
@@ -163,11 +192,24 @@ export function tick(state: SimState, dt: number): SimEvent[] {
   const events: SimEvent[] = []
   if (!(dt > 0)) return events
   state.acc += Math.min(dt, MAX_DT)
+  let stepped = false
   while (state.acc >= STEP) {
     state.acc -= STEP
     step(state, events)
+    stepped = true
   }
+  if (stepped) checkStamps(state, events)
   return events
+}
+
+/** Hands out every stamp whose mark has been reached. */
+function checkStamps(state: SimState, events: SimEvent[]): void {
+  if (state.stamps.length === STAMPS.length) return
+  for (const stamp of STAMPS) {
+    if (state.stamps.includes(stamp.id) || !stamp.earned(state)) continue
+    state.stamps.push(stamp.id)
+    events.push({ type: 'stamp', id: stamp.id })
+  }
 }
 
 function pay(state: SimState, coins: number): number {
@@ -194,7 +236,12 @@ function dealOrders(state: SimState): void {
 /** A new order of a kind that is not on the board already, sized to a few minutes of this line's work. */
 function newOrder(state: SimState, others: Order[]): Order {
   const { config } = state
-  const open = ORDER_KINDS.filter((kind) => !others.some((order) => order.kind === kind) && (kind !== 'catch' || config.rareChance > 0))
+  const open = ORDER_KINDS.filter(
+    (kind) =>
+      !others.some((order) => order.kind === kind) &&
+      (kind !== 'catch' || config.rareChance > 0) &&
+      (kind !== 'beads' || config.families.includes('bead')),
+  )
   const kind = open[Math.floor(orderRandom(state) * open.length)] ?? 'jars'
   const minutes = state.ordersDone < STARTER_ORDERS ? 0.6 + orderRandom(state) * 0.6 : 1.5 + orderRandom(state) * 2
   const jarsPerMinute = 60 / feedInterval(state) / config.jarCapacity
@@ -211,6 +258,12 @@ function newOrder(state: SimState, others: Order[]): Order {
   if (kind === 'hand') {
     const need = Math.round((minutes * 12) / 5) * 5
     return { kind, need, have: 0, worth: need * 0.12 }
+  }
+  if (kind === 'beads') {
+    // One item in every few is a bead. The order is worth the jars those items fill.
+    const kinds = config.families.length
+    const need = Math.max(5, Math.round((jarsPerMinute * config.jarCapacity * minutes) / kinds / 5) * 5)
+    return { kind, need, have: 0, worth: ((need * kinds) / config.jarCapacity) * 0.5 }
   }
   const need = minutes < 2.5 ? 1 : 2
   return { kind, need, have: 0, worth: need * 4 }
@@ -273,7 +326,7 @@ export function giveLucky(state: SimState, gift: LuckyGift, events: SimEvent[]):
   if (gift === 'shower') {
     const rares: ItemKind[] = []
     for (let n = 0; n < config.luckyShower; n++) {
-      rares.push({ family: 'marble', colour: config.stations[0].colour, rare: pickRare(luckyRandom(state)) })
+      rares.push({ family: 'marble', colour: config.stations[0].colour, rare: pickRare(state, luckyRandom(state)) })
     }
     state.recycle.unshift(...rares)
     events.push({ type: 'luckyCaught', gift, coins: 0 })
@@ -319,6 +372,7 @@ function chargeRush(state: SimState, hits: number, events: SimEvent[]): void {
   if (state.rushCharge < state.config.rushHits) return
   state.rushCharge = 0
   state.rushLeft = rushSeconds(state)
+  state.rushes++
   events.push({ type: 'rushStarted', seconds: state.rushLeft })
 }
 
@@ -343,7 +397,12 @@ function step(state: SimState, events: SimEvent[]): void {
     state.luckyLeft = Math.max(0, state.luckyLeft - STEP)
     if (state.luckyLeft === 0) {
       scheduleLucky(state)
-      events.push({ type: 'luckyGone' })
+      if (has(state, 'catcher')) {
+        const coins = pay(state, Math.round(steadyIncome(state) * config.luckyCoinSeconds * config.catcherShare))
+        events.push({ type: 'luckyCaught', gift: 'coins', coins, catcher: true })
+      } else {
+        events.push({ type: 'luckyGone' })
+      }
     }
   } else {
     state.luckyIn -= STEP
@@ -360,11 +419,10 @@ function step(state: SimState, events: SimEvent[]): void {
     if (station.swapLeft === 0) events.push({ type: 'jarReady', station: i })
   }
 
-  const speed = beltSpeed(state)
   const kept: BeltItem[] = []
   for (const item of state.items) {
     const from = item.x
-    item.x += speed * STEP
+    item.x += itemSpeed(state, item) * STEP
     const station = item.rare
       ? -1
       : state.stations.findIndex((s) => s.colour === item.colour && s.swapLeft === 0 && from < s.x && item.x >= s.x)
@@ -392,8 +450,11 @@ function placeInJar(state: SimState, item: BeltItem, index: number, byHand: bool
   station.count++
   state.sorted++
   if (byHand) countTowardOrders(state, 'hand', undefined, 1, events)
+  if (item.family === 'bead') countTowardOrders(state, 'beads', undefined, 1, events)
   if (station.count < config.jarCapacity) return
-  events.push({ type: 'jarFull', station: index, shelfIndex: state.shelved, coins: pay(state, Math.round(config.jarCoins * price)) })
+  const golden = has(state, 'golden') && (state.shelved + 1) % config.goldenEvery === 0
+  const coins = pay(state, Math.round(config.jarCoins * price * (golden ? config.goldenPay : 1)))
+  events.push({ type: 'jarFull', station: index, shelfIndex: state.shelved, coins, golden })
   state.shelved++
   station.count = 0
   station.swapLeft = config.jarSwapSeconds
@@ -412,8 +473,7 @@ function catchRare(state: SimState, item: BeltItem, rare: RareId, byHand: boolea
 }
 
 function feed(state: SimState, events: SimEvent[]): void {
-  const { config } = state
-  if (state.items.length >= config.maxOnBelt) return
+  if (state.items.length >= maxOnBelt(state)) return
   state.feedTimer += STEP
   const interval = feedInterval(state)
   if (state.feedTimer < interval) return
@@ -432,7 +492,7 @@ function newKind(state: SimState): ItemKind {
   const chance = rareChanceNow(state)
   if (chance > 0 && state.items.filter((item) => item.rare).length < maxRares && nextRandom(state) < chance) {
     state.sinceRare = 0
-    return { family: 'marble', colour: stations[0].colour, rare: pickRare(nextRandom(state)) }
+    return { family: 'marble', colour: stations[0].colour, rare: pickRare(state, nextRandom(state)) }
   }
   if (chance > 0) state.sinceRare++
   return {
@@ -441,14 +501,15 @@ function newKind(state: SimState): ItemKind {
   }
 }
 
-/** The rare marble for a number from 0 to 1: the commoner tiers take more of that range. */
-function pickRare(random: number): RareId {
-  let roll = random * RARE_WEIGHT_TOTAL
-  for (const rare of RARES) {
+/** The rare marble for a number from 0 to 1, among those this workshop can deal: the commoner tiers take more of that range. */
+function pickRare(state: SimState, random: number): RareId {
+  const open = availableRares(state)
+  let roll = random * open.reduce((sum, rare) => sum + TIER_WEIGHT[rare.tier], 0)
+  for (const rare of open) {
     roll -= TIER_WEIGHT[rare.tier]
     if (roll < 0) return rare.id
   }
-  return RARES[RARES.length - 1].id
+  return open[open.length - 1].id
 }
 
 /**
@@ -463,6 +524,7 @@ export function flick(state: SimState, itemId: number): SimEvent[] {
   if (item.rare) {
     state.items.splice(at, 1)
     extendChain(state)
+    state.rareByHand++
     catchRare(state, item, item.rare, true, events)
     chargeRush(state, RUSH_HITS_FOR_RARE, events)
     return events
@@ -471,6 +533,7 @@ export function flick(state: SimState, itemId: number): SimEvent[] {
   if (station < 0) return events
   state.items.splice(at, 1)
   extendChain(state)
+  state.handSorted++
   placeInJar(state, item, station, true, events)
   chargeRush(state, state.chain >= state.config.chainRushAt ? 2 : 1, events)
   return events

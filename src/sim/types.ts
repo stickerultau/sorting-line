@@ -86,12 +86,19 @@ export interface SimState {
   bestChain: number
   /** New items dealt since the last rare marble. A long dry spell raises the chance of the next one. */
   sinceRare: number
+  /** Lifetime counts, kept through every new workshop: items sorted by hand, rare marbles caught by hand, rushes, workshops opened. */
+  handSorted: number
+  rareByHand: number
+  rushes: number
+  workshops: number
+  /** Ids of the stamps earned, in the order they were earned. */
+  stamps: string[]
 }
 
 export type SimEvent =
   | { type: 'spawned'; item: BeltItem }
   | { type: 'sorted'; item: BeltItem; station: number; slot: number; byHand: boolean; coins: number; /** The length of the hand chain this is part of. 0 for a flipper. */ chain: number }
-  | { type: 'jarFull'; station: number; shelfIndex: number; coins: number }
+  | { type: 'jarFull'; station: number; shelfIndex: number; coins: number; golden: boolean }
   | { type: 'caught'; item: BeltItem; rare: RareId; byHand: boolean; coins: number; first: boolean }
   | { type: 'jarReady'; station: number }
   | { type: 'recycled'; item: BeltItem }
@@ -101,7 +108,11 @@ export type SimEvent =
   | { type: 'luckyArrived'; seconds: number }
   /** It left without being caught. */
   | { type: 'luckyGone' }
-  /** `coins` is what a gift of coins paid, `slot` the order a gift finished, `upgrade` the level a gift added. */
-  | { type: 'luckyCaught'; gift: LuckyGift; coins: number; slot?: number; upgrade?: UpgradeId }
+  /**
+   * `coins` is what a gift of coins paid, `slot` the order a gift finished, `upgrade` the level a gift added.
+   * `catcher` is set when nobody clicked it and the catcher saved part of it.
+   */
+  | { type: 'luckyCaught'; gift: LuckyGift; coins: number; slot?: number; upgrade?: UpgradeId; catcher?: true }
+  | { type: 'stamp'; id: string }
   | { type: 'frenzyEnded' }
   | { type: 'chainEnded'; length: number }

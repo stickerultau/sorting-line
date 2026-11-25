@@ -16,11 +16,12 @@ import {
   steadyJarPay,
   tick,
 } from '../src/sim/sim'
+import { configFor } from '../src/sim/unlocks'
 import { warmUp } from '../src/sim/warmup'
 import type { Order, SimEvent, SimState } from '../src/sim/types'
 
 /** A line where nothing arrives by itself, so each test places the items it needs. */
-const QUIET: SimConfig = { ...DEFAULT_CONFIG, rareChance: 0, startShelved: 0, feedInterval: 1000 }
+const QUIET: SimConfig = { ...DEFAULT_CONFIG, rareChance: 0, startShelved: 0, feedInterval: 1000, stampBonus: 0 }
 const NOW = 1_800_000_000_000
 
 const ofType = <T extends SimEvent['type']>(events: SimEvent[], type: T) =>
@@ -307,7 +308,7 @@ describe('saving the all-day loop', () => {
   it('replaces orders that make no sense with new ones', () => {
     const data = parseSave({ ...toSave(played(), NOW), orders: [{ kind: 'bogus', need: 3, have: 0, worth: 1 }, { kind: 'jars', need: -2 }, 'x'], rushCharge: 1e9 })!
     const { state } = resume(DEFAULT_CONFIG, 1, data, NOW + 5_000)
-    expect(state.orders).toEqual(createSim(DEFAULT_CONFIG, 1).orders)
+    expect(state.orders).toEqual(createSim(configFor(DEFAULT_CONFIG, 3), 1).orders)
     expect(state.rushCharge).toBeLessThan(DEFAULT_CONFIG.rushHits)
   })
 
@@ -327,7 +328,7 @@ describe('saving the all-day loop', () => {
     ]
     for (const orders of bad) {
       const { state } = resume(DEFAULT_CONFIG, 1, parseSave({ ...toSave(played(), NOW), orders })!, NOW + 5_000)
-      expect(state.orders, JSON.stringify(orders)).toEqual(createSim(DEFAULT_CONFIG, 1).orders)
+      expect(state.orders, JSON.stringify(orders)).toEqual(createSim(configFor(DEFAULT_CONFIG, 3), 1).orders)
     }
   })
 
@@ -346,9 +347,17 @@ describe('saving the all-day loop', () => {
   it('repairs progress past the end of an order and a colour that is not on the line', () => {
     const data = parseSave({
       ...toSave(played(), NOW),
-      orders: [{ kind: 'jars', need: 5, have: 99, worth: 2 }, { kind: 'colour', colour: 'green', need: 5, have: 0, worth: 2 }, { kind: 'hand', need: 5, have: 0, worth: 2 }],
+      orders: [{ kind: 'jars', need: 5, have: 99, worth: 2 }, { kind: 'colour', colour: 'orange', need: 5, have: 0, worth: 2 }, { kind: 'hand', need: 5, have: 0, worth: 2 }],
     })!
     expect(data.orders).toBeNull()
+    // A colour or a kind of item this line does not have yet: the order could never be finished, so new ones are dealt.
+    for (const stuck of [order('colour', 5, { colour: 'purple' }), order('beads', 5)]) {
+      const early = toSave(played(), NOW)
+      early.stars = 0
+      early.orders = [order('jars', 5), order('hand', 5), stuck]
+      const { state } = resume(DEFAULT_CONFIG, 1, parseSave(JSON.parse(JSON.stringify(early)))!, NOW + 5_000)
+      expect(state.orders).toEqual(createSim(DEFAULT_CONFIG, 1).orders)
+    }
     const good = parseSave({ ...toSave(played(), NOW), orders: [order('jars', 5, { have: 99 }), order('hand', 5), order('catch', 1)] })!
     expect(good.orders![0].have).toBe(5)
   })

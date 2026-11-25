@@ -71,7 +71,7 @@ describe('sorting, jars and swapping', () => {
     s.items.push(redMarble(99, 5.9))
     const events = tick(s, 0.25)
     expect(events.map((e) => e.type)).toEqual(['sorted', 'jarFull'])
-    expect(events[1]).toEqual({ type: 'jarFull', station: 0, shelfIndex: 7, coins: 10 })
+    expect(events[1]).toEqual({ type: 'jarFull', station: 0, shelfIndex: 7, coins: 10, golden: false })
     expect(s.shelved).toBe(8)
     expect(s.stations[0].count).toBe(0)
     expect(s.stations[0].swapLeft).toBeGreaterThan(0)

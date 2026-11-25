@@ -1,6 +1,7 @@
-import { MASTERY_AT, RARES, TIER_WEIGHT, UPGRADES, type RareId, type UpgradeId } from '../content/content'
+import { MASTERY_AT, TIER_WEIGHT, UPGRADES, type RareId, type UpgradeId } from '../content/content'
 import { feedInterval, masteryRank, nextStarAt, rareChance, upgradeCost } from './sim'
 import type { SimState } from './types'
+import { availableRares } from './unlocks'
 
 /** The nearest thing a player is waiting for, and about how many seconds away it is. */
 export type Goal =
@@ -9,8 +10,6 @@ export type Goal =
   | { kind: 'star'; seconds: number }
   /** `rank` is the rank that `more` catches of this marble will reach. */
   | { kind: 'marble'; rare: RareId; rank: number; more: number; seconds: number }
-
-const RARE_WEIGHT_TOTAL = RARES.reduce((sum, rare) => sum + TIER_WEIGHT[rare.tier], 0)
 
 /**
  * The goal that is soonest at the rate the line is working and earning now. Things that can be had already,
@@ -40,16 +39,22 @@ export function nextGoal(state: SimState, coinsPerSecond: number): Goal | null {
   state.orders.forEach((order, slot) => {
     const left = order.need - order.have
     if (left <= 0 || order.kind === 'hand') return
-    const each = order.kind === 'jars' ? jarSeconds : order.kind === 'colour' ? jarSeconds * config.stations.length : rareSeconds
+    const each =
+      order.kind === 'jars' ? jarSeconds
+      : order.kind === 'colour' ? jarSeconds * config.stations.length
+      : order.kind === 'beads' ? feedInterval(state) * config.families.length
+      : rareSeconds
     goals.push({ kind: 'order', slot, seconds: left * each })
   })
 
-  for (const rare of RARES) {
+  const open = availableRares(state)
+  const weightTotal = open.reduce((sum, rare) => sum + TIER_WEIGHT[rare.tier], 0)
+  for (const rare of open) {
     const owned = state.collection[rare.id] ?? 0
     const rank = masteryRank(owned)
     if (owned === 0 || rank >= MASTERY_AT.length) continue
     const more = MASTERY_AT[rank] - owned
-    goals.push({ kind: 'marble', rare: rare.id, rank: rank + 1, more, seconds: (more * rareSeconds * RARE_WEIGHT_TOTAL) / TIER_WEIGHT[rare.tier] })
+    goals.push({ kind: 'marble', rare: rare.id, rank: rank + 1, more, seconds: (more * rareSeconds * weightTotal) / TIER_WEIGHT[rare.tier] })
   }
 
   let soonest: Goal | null = null

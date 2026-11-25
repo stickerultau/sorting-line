@@ -1,16 +1,46 @@
-export type ColourId = 'red' | 'yellow' | 'blue'
-export type FamilyId = 'marble' | 'button'
+export type ColourId = 'red' | 'yellow' | 'blue' | 'green' | 'purple'
+export type FamilyId = 'marble' | 'button' | 'bead'
+/** Every kind of item there is. A line starts with the first two; beads come with an unlock. */
+export const FAMILIES: FamilyId[] = ['marble', 'button', 'bead']
 
 export const COLOUR_HEX: Record<ColourId, number> = {
   red: 0xe23d44,
   yellow: 0xf4b81f,
   blue: 0x2a78e4,
+  green: 0x2fa85a,
+  purple: 0x8b52d9,
 }
+
+/** Lasting things a workshop gains when its owner's star total reaches a mark. */
+export type UnlockId = 'green' | 'catcher' | 'beads' | 'golden' | 'twin' | 'magnet' | 'purple' | 'night'
+
+export interface Unlock {
+  id: UnlockId
+  name: string
+  blurb: string
+  /** The star total it comes at. */
+  stars: number
+}
+
+// The star totals were set against a simulated player who plays half an hour a day (see the README).
+export const UNLOCKS: Unlock[] = [
+  { id: 'green', name: 'Green', blurb: 'A fourth colour and jar station, and four new marbles to find.', stars: 1 },
+  { id: 'catcher', name: 'Catcher', blurb: 'Collects a lucky marble you miss, for half a gift of coins.', stars: 2 },
+  { id: 'beads', name: 'Beads', blurb: 'A third kind of item, with its own orders and four new marbles.', stars: 3 },
+  { id: 'golden', name: 'Golden jars', blurb: 'Every tenth jar is golden and pays five times.', stars: 5 },
+  { id: 'twin', name: 'Twin chute', blurb: 'Items drop two at a time: the line carries twice as much.', stars: 8 },
+  { id: 'magnet', name: 'Magnet', blurb: 'Rare marbles ride the belt at half speed, so they are easier to catch.', stars: 12 },
+  { id: 'purple', name: 'Purple', blurb: 'A fifth colour and jar station, and four new marbles to find.', stars: 16 },
+  { id: 'night', name: 'Night shift', blurb: 'Time away pays three quarters, for up to twelve hours.', stars: 22 },
+]
 
 export type RareId =
   | 'catseye' | 'candy' | 'clambroth' | 'agate' | 'onionskin'
   | 'oxblood' | 'sunburst' | 'opal' | 'goldstone'
   | 'galaxy' | 'comet' | 'aurora'
+  | 'fern' | 'petal' | 'honey' | 'dragonfly'
+  | 'seafoam' | 'coral' | 'pearl' | 'abyss'
+  | 'plum' | 'amethyst' | 'velvet' | 'crown'
 
 export type RarePattern = 'vane' | 'swirl' | 'bands' | 'streak' | 'speckle' | 'nebula'
 
@@ -43,6 +73,35 @@ export const RARES: RareKind[] = [
   { id: 'galaxy', name: 'Galaxy', tier: 3, coins: 300, palette: ['#0b1030', '#5a4fd6', '#ff7ad1'], pattern: 'nebula' },
   { id: 'comet', name: 'Comet', tier: 3, coins: 300, palette: ['#081a2b', '#7fe3ff', '#ffffff'], pattern: 'swirl' },
   { id: 'aurora', name: 'Aurora', tier: 3, coins: 300, palette: ['#06231f', '#35f0a0', '#8a6bff'], pattern: 'nebula' },
+  { id: 'fern', name: 'Fern', tier: 1, coins: 25, palette: ['#e6f4d7', '#3f8f3a', '#c9e265'], pattern: 'streak' },
+  { id: 'petal', name: 'Petal', tier: 1, coins: 25, palette: ['#fbe9ef', '#e86a9a', '#f7c84a'], pattern: 'vane' },
+  { id: 'honey', name: 'Honey', tier: 2, coins: 90, palette: ['#f6c544', '#b86b12', '#fff2c2'], pattern: 'bands' },
+  { id: 'dragonfly', name: 'Dragonfly', tier: 3, coins: 300, palette: ['#0d2b2a', '#2fe0c0', '#5a7dff'], pattern: 'nebula' },
+  { id: 'seafoam', name: 'Seafoam', tier: 1, coins: 25, palette: ['#dff5ef', '#4fc3b0', '#2a78e4'], pattern: 'swirl' },
+  { id: 'coral', name: 'Coral', tier: 1, coins: 25, palette: ['#fde3d6', '#f0624d', '#ffd08a'], pattern: 'speckle' },
+  { id: 'pearl', name: 'Pearl', tier: 2, coins: 90, palette: ['#f4f1ea', '#d9cfe6', '#bfe3e0'], pattern: 'nebula' },
+  { id: 'abyss', name: 'Abyss', tier: 3, coins: 300, palette: ['#04101f', '#1f6bff', '#35f0d0'], pattern: 'swirl' },
+  { id: 'plum', name: 'Plum', tier: 1, coins: 25, palette: ['#ead9f2', '#7a3fa8', '#e5b84a'], pattern: 'bands' },
+  { id: 'amethyst', name: 'Amethyst', tier: 2, coins: 90, palette: ['#3b1d5e', '#b98cff', '#f1e6ff'], pattern: 'speckle' },
+  { id: 'velvet', name: 'Velvet', tier: 2, coins: 90, palette: ['#3a0a1e', '#c2185b', '#f7c6d9'], pattern: 'streak' },
+  { id: 'crown', name: 'Crown', tier: 3, coins: 300, palette: ['#1c1206', '#ffd24a', '#ff5ad1'], pattern: 'vane' },
+]
+
+/** Marbles are collected in sets of four. A set with an unlock is only dealt once that unlock is held. */
+export interface MarbleSet {
+  id: string
+  name: string
+  rares: RareId[]
+  unlock?: UnlockId
+}
+
+export const SETS: MarbleSet[] = [
+  { id: 'schoolyard', name: 'Schoolyard', rares: ['catseye', 'candy', 'clambroth', 'onionskin'] },
+  { id: 'earth', name: 'Earth', rares: ['agate', 'oxblood', 'sunburst', 'goldstone'] },
+  { id: 'sky', name: 'Night sky', rares: ['opal', 'galaxy', 'comet', 'aurora'] },
+  { id: 'garden', name: 'Garden', rares: ['fern', 'petal', 'honey', 'dragonfly'], unlock: 'green' },
+  { id: 'sea', name: 'Sea', rares: ['seafoam', 'coral', 'pearl', 'abyss'], unlock: 'beads' },
+  { id: 'royal', name: 'Royal', rares: ['plum', 'amethyst', 'velvet', 'crown'], unlock: 'purple' },
 ]
 
 /** Catches of one marble needed for each rank: found, bronze, silver, gold. */
@@ -51,9 +110,9 @@ export const MASTERY_NAME = ['Not found yet', 'Found', 'Bronze', 'Silver', 'Gold
 /** Lasting share of extra coins for each rank of a marble, times its tier. */
 export const MASTERY_BONUS = 0.02
 
-/** What an order asks for: full jars, full jars of one colour, items sorted by hand, or rare marbles caught. */
-export type OrderKind = 'jars' | 'colour' | 'hand' | 'catch'
-export const ORDER_KINDS: OrderKind[] = ['jars', 'colour', 'hand', 'catch']
+/** What an order asks for: full jars, full jars of one colour, items sorted by hand, rare marbles caught, or beads put in jars. */
+export type OrderKind = 'jars' | 'colour' | 'hand' | 'catch' | 'beads'
+export const ORDER_KINDS: OrderKind[] = ['jars', 'colour', 'hand', 'catch', 'beads']
 
 /** What a caught lucky marble can give. */
 export type LuckyGift = 'coins' | 'frenzy' | 'shower' | 'order' | 'upgrade'
@@ -151,6 +210,23 @@ export interface SimConfig {
   chainTop: number
   /** From this length on, each hand sort in a chain fills the rush meter twice. */
   chainRushAt: number
+  /** Lasting share of extra coins for each stamp, and for each full set of marbles. */
+  stampBonus: number
+  setBonus: number
+  /** With golden jars, one jar in this many is golden. */
+  goldenEvery: number
+  /** A golden jar pays this many times a plain one. */
+  goldenPay: number
+  /** Share of a gift of coins the catcher saves from a lucky marble nobody clicked. */
+  catcherShare: number
+  /** With the twin chute, items are fed this many times as fast, and the belt holds this many times as many. */
+  twinFeed: number
+  twinBelt: number
+  /** With the magnet, rare marbles move at this share of the belt's speed. */
+  magnetSlow: number
+  /** With the night shift, time away pays this share for up to this many seconds. */
+  nightRate: number
+  nightCapSeconds: number
 }
 
 export const DEFAULT_CONFIG: SimConfig = {
@@ -190,4 +266,14 @@ export const DEFAULT_CONFIG: SimConfig = {
   chainStep: 0.1,
   chainTop: 40,
   chainRushAt: 10,
+  stampBonus: 0.01,
+  setBonus: 0.1,
+  goldenEvery: 10,
+  goldenPay: 5,
+  catcherShare: 0.5,
+  twinFeed: 2,
+  twinBelt: 2.5,
+  magnetSlow: 0.5,
+  nightRate: 0.75,
+  nightCapSeconds: 12 * 3600,
 }

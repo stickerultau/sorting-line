@@ -9,6 +9,8 @@ import type { SimEvent, SimState } from './types'
  */
 export function warmUp(state: SimState, seconds: number, dt: number, each: (events: SimEvent[]) => void): void {
   const { coins, earned, runEarned, config, luckyIn, frenzyLeft, rushLeft } = state
+  // Stamps earned in the rehearsal are handed back, so they are earned again, and announced, once the game is on show.
+  const stamps = [...state.stamps]
   const orders = state.orders.map((order) => ({ ...order }))
   const rares = state.recycle.filter((kind) => kind.rare)
   state.recycle = state.recycle.filter((kind) => !kind.rare)
@@ -21,6 +23,7 @@ export function warmUp(state: SimState, seconds: number, dt: number, each: (even
   state.luckyIn = luckyIn
   state.frenzyLeft = frenzyLeft
   state.rushLeft = rushLeft
+  state.stamps = stamps
   state.recycle.unshift(...rares)
   state.coins = coins
   state.earned = earned

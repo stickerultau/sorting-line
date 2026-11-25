@@ -1,5 +1,5 @@
 import * as THREE from 'three'
-import { COLOUR_HEX, type ColourId, type FamilyId } from '../content/content'
+import { COLOUR_HEX, FAMILIES, type ColourId, type FamilyId } from '../content/content'
 import type { Models } from './models'
 
 const PARKED = new THREE.Matrix4().compose(
@@ -17,12 +17,12 @@ export class ItemPool {
   private meshes: Record<FamilyId, THREE.InstancedMesh>
   private used: Record<FamilyId, Uint8Array>
   /** No handle below this is free. */
-  private searchFrom: Record<FamilyId, number> = { marble: 0, button: 0 }
+  private searchFrom: Record<FamilyId, number>
   private matrix = new THREE.Matrix4()
   private scale = new THREE.Vector3()
   private colour = new THREE.Color()
 
-  constructor(scene: THREE.Scene, models: Models, capacity: number) {
+  constructor(scene: THREE.Object3D, models: Models, capacity: number) {
     const make = (family: FamilyId) => {
       const mesh = new THREE.InstancedMesh(models.itemGeometry[family], models.itemMaterial[family], capacity)
       for (let i = 0; i < capacity; i++) {
@@ -36,8 +36,18 @@ export class ItemPool {
       scene.add(mesh)
       return mesh
     }
-    this.meshes = { marble: make('marble'), button: make('button') }
-    this.used = { marble: new Uint8Array(capacity), button: new Uint8Array(capacity) }
+    const each = <T>(value: (family: FamilyId) => T) => Object.fromEntries(FAMILIES.map((family) => [family, value(family)])) as Record<FamilyId, T>
+    this.meshes = each(make)
+    this.used = each(() => new Uint8Array(capacity))
+    this.searchFrom = each(() => 0)
+  }
+
+  /** Frees what the pool holds on the graphics card. The pool cannot be used afterwards. */
+  dispose(): void {
+    for (const mesh of Object.values(this.meshes)) {
+      mesh.removeFromParent()
+      mesh.dispose()
+    }
   }
 
   alloc(family: FamilyId, colour: ColourId): number {

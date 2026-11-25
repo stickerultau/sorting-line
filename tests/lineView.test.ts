@@ -96,7 +96,7 @@ describe('LineView', () => {
     expect(liveItems(scene)).toHaveLength(30 * 12)
 
     // An empty jar leaves station 0 for shelf place 0, which is taken.
-    view.handle([{ type: 'jarFull', station: 0, shelfIndex: 30, coins: 10 }])
+    view.handle([{ type: 'jarFull', station: 0, shelfIndex: 30, coins: 10, golden: false }])
     for (let t = 0; t < 1.2; t += 1 / 32) view.update(state, 1 / 32) // the new jar is still in flight
     expect(liveItems(scene)).toHaveLength(29 * 12)
   })
@@ -221,7 +221,7 @@ describe('LineView', () => {
   it('shows the coins a full jar pays', () => {
     const state = createSim(QUIET, 1)
     const { view, pops } = makeView(state)
-    view.handle([{ type: 'jarFull', station: 1, shelfIndex: 0, coins: 14 }])
+    view.handle([{ type: 'jarFull', station: 1, shelfIndex: 0, coins: 14, golden: false }])
     for (let t = 0; t < 2; t += 1 / 32) view.update(state, 1 / 32)
     expect(pops).toEqual(['+14'])
   })

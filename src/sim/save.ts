@@ -1,5 +1,7 @@
 import { COLOUR_HEX, ORDER_KINDS, RARES, UPGRADES, type ColourId, type OrderKind, type RareId, type SimConfig, type UpgradeId } from '../content/content'
-import { countTowardOrders, createSim, feedInterval, rushSeconds, steadyJarPay } from './sim'
+import { countTowardOrders, createSim, feedInterval, jarAverage, rushSeconds, steadyJarPay } from './sim'
+import { STAMPS } from './stamps'
+import { configFor, has } from './unlocks'
 import type { Order, SimState } from './types'
 
 export interface SaveData {
@@ -29,6 +31,11 @@ export interface SaveData {
   sinceRare: number
   /** Rare marbles that were on the belt or waiting to be fed. They come back, so a shower is never lost. */
   rares: RareId[]
+  handSorted: number
+  rareByHand: number
+  rushes: number
+  workshops: number
+  stamps: string[]
 }
 
 export interface Away {
@@ -62,6 +69,11 @@ export function toSave(state: SimState, now: number): SaveData {
     bestChain: state.bestChain,
     sinceRare: state.sinceRare,
     rares: [...state.items, ...state.recycle].flatMap((kind) => (kind.rare ? [kind.rare] : [])),
+    handSorted: state.handSorted,
+    rareByHand: state.rareByHand,
+    rushes: state.rushes,
+    workshops: state.workshops,
+    stamps: [...state.stamps],
   }
 }
 
@@ -137,6 +149,11 @@ export function parseSave(raw: unknown): SaveData | null {
     rares: (Array.isArray(data.rares) ? data.rares : [])
       .filter((rare): rare is RareId => RARES.some((kind) => kind.id === rare))
       .slice(0, MAX_RARES_KEPT),
+    handSorted: count(data.handSorted),
+    rareByHand: count(data.rareByHand),
+    rushes: count(data.rushes),
+    workshops: count(data.workshops),
+    stamps: STAMPS.map((stamp) => stamp.id).filter((id) => Array.isArray(data.stamps) && data.stamps.includes(id)),
     shelved: count(data.shelved),
     sorted: count(data.sorted),
     upgrades,
@@ -146,10 +163,11 @@ export function parseSave(raw: unknown): SaveData | null {
 
 /** What the line earns while nobody is watching: full jars at the away rate, up to the cap. */
 export function awayEarnings(state: SimState, seconds: number): { jars: number; coins: number } {
-  const { awayRate, awayCapSeconds, jarCapacity } = state.config
-  const counted = Math.min(Math.max(seconds, 0), awayCapSeconds)
-  const jars = Math.floor((counted * awayRate) / feedInterval(state) / jarCapacity)
-  return { jars, coins: jars * steadyJarPay(state) }
+  const { config } = state
+  const night = has(state, 'night')
+  const counted = Math.min(Math.max(seconds, 0), night ? config.nightCapSeconds : config.awayCapSeconds)
+  const jars = Math.floor((counted * (night ? config.nightRate : config.awayRate)) / feedInterval(state) / config.jarCapacity)
+  return { jars, coins: Math.round(jars * steadyJarPay(state) * jarAverage(state)) }
 }
 
 /**
@@ -168,12 +186,17 @@ export function payAway(state: SimState, seconds: number): Away | null {
   countTowardOrders(state, 'jars', undefined, jars)
   const ofEachColour = Math.floor(jars / state.config.stations.length)
   for (const station of state.config.stations) countTowardOrders(state, 'colour', station.colour, ofEachColour)
+  if (state.config.families.includes('bead')) {
+    countTowardOrders(state, 'beads', undefined, Math.floor((jars * state.config.jarCapacity) / state.config.families.length))
+  }
   return { seconds, jars, coins }
 }
 
 /** Starts the line from a save, or fresh when there is none, and pays for the time away. */
 export function resume(config: SimConfig, seed: number, data: SaveData | null, now: number): { state: SimState; away: Away | null } {
   if (!data) return { state: createSim(config, seed), away: null }
+  // The line is laid out for the colours and kinds of item the saved stars have earned.
+  config = configFor(config, data.stars)
   const state = createSim({ ...config, startShelved: data.shelved }, seed)
   state.coins = data.coins
   state.earned = data.earned
@@ -190,8 +213,17 @@ export function resume(config: SimConfig, seed: number, data: SaveData | null, n
   state.frenzyLeft = Math.min(data.frenzyLeft, config.frenzySeconds)
   state.bestChain = data.bestChain
   state.sinceRare = data.sinceRare
+  state.handSorted = data.handSorted
+  state.rareByHand = data.rareByHand
+  state.rushes = data.rushes
+  state.workshops = data.workshops
+  state.stamps = [...data.stamps]
   state.recycle.push(...data.rares.map((rare) => ({ family: 'marble' as const, colour: config.stations[0].colour, rare })))
-  if (data.orders?.length === config.orderSlots) state.orders = data.orders.map((order) => ({ ...order }))
+  // Saved orders are kept only if this line can still do every one of them.
+  const fits = (order: Order) =>
+    (order.kind !== 'colour' || config.stations.some((station) => station.colour === order.colour)) &&
+    (order.kind !== 'beads' || config.families.includes('bead'))
+  if (data.orders?.length === config.orderSlots && data.orders.every(fits)) state.orders = data.orders.map((order) => ({ ...order }))
 
   const away = payAway(state, Math.floor((now - data.savedAt) / 1000))
   if (away) state.config = { ...state.config, startShelved: state.shelved }

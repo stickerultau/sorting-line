@@ -20,7 +20,7 @@ import { warmUp } from '../src/sim/warmup'
 import type { SimEvent, SimState } from '../src/sim/types'
 
 /** A line where nothing arrives by itself and no jar ever fills, so each test places the items it needs. */
-const QUIET: SimConfig = { ...DEFAULT_CONFIG, rareChance: 0, startShelved: 0, feedInterval: 1000, jarCapacity: 100_000 }
+const QUIET: SimConfig = { ...DEFAULT_CONFIG, rareChance: 0, startShelved: 0, feedInterval: 1000, jarCapacity: 100_000, stampBonus: 0 }
 const NOW = 1_800_000_000_000
 
 const ofType = <T extends SimEvent['type']>(events: SimEvent[], type: T) =>

@@ -12,7 +12,8 @@ const CAN_PAINT = typeof document !== 'undefined'
 export const TABLE_Y = JAR.topY - JAR.height
 export const BELT_HALF_DEPTH = 0.62
 /** Height of an item's centre above the belt when it lies at rest. */
-export const REST_Y: Record<FamilyId, number> = { marble: ITEM_RADIUS, button: 0.055 }
+const BEAD = { ring: 0.125, tube: 0.075 }
+export const REST_Y: Record<FamilyId, number> = { marble: ITEM_RADIUS, button: 0.055, bead: BEAD.tube }
 
 const RIB_SPACING = 0.5
 const CREAM = 0xf4eee2
@@ -27,6 +28,8 @@ export interface Models {
   glass: THREE.Material
   lidGeometry: THREE.BufferGeometry
   enamel: Record<ColourId, THREE.Material>
+  /** The lid of a golden jar. */
+  gold: THREE.Material
   rareGeometry: THREE.BufferGeometry
   rareMaterial: Record<RareId, THREE.Material>
   /** The halo round a rare marble, and the shape of every spark. Null where nothing can be painted. */
@@ -178,6 +181,8 @@ export function buildModels(): Models {
     itemGeometry: {
       marble: new THREE.SphereGeometry(ITEM_RADIUS, 24, 14),
       button: buttonGeometry(),
+      // A bead is a fat ring lying flat.
+      bead: new THREE.TorusGeometry(BEAD.ring, BEAD.tube, 8, 16).rotateX(Math.PI / 2),
     },
     itemMaterial: {
       marble: new THREE.MeshPhysicalMaterial({
@@ -187,6 +192,7 @@ export function buildModels(): Models {
         clearcoatRoughness: 0.03,
       }),
       button: new THREE.MeshPhysicalMaterial({ roughness: 0.36, clearcoat: 0.7, clearcoatRoughness: 0.2 }),
+      bead: new THREE.MeshPhysicalMaterial({ roughness: 0.14, clearcoat: 1, clearcoatRoughness: 0.05 }),
     },
     jarGeometry: lathe([
       [0, 0], [0.5, 0], [0.59, 0.05], [0.62, 0.15], [0.62, JAR.height - 0.24],
@@ -210,11 +216,8 @@ export function buildModels(): Models {
       side: THREE.DoubleSide,
     }),
     lidGeometry: lathe([[0.66, 0], [0.66, 0.09], [0.62, 0.12], [0.16, 0.13], [0.13, 0.2], [0.09, 0.25], [0, 0.26]]),
-    enamel: {
-      red: enamel(COLOUR_HEX.red),
-      yellow: enamel(COLOUR_HEX.yellow),
-      blue: enamel(COLOUR_HEX.blue),
-    },
+    enamel: Object.fromEntries(Object.entries(COLOUR_HEX).map(([colour, hex]) => [colour, enamel(hex)])) as unknown as Record<ColourId, THREE.Material>,
+    gold: new THREE.MeshStandardMaterial({ color: 0xf2b632, metalness: 1, roughness: 0.2, emissive: 0xb86a00, emissiveIntensity: 0.35 }),
     rareGeometry: new THREE.SphereGeometry(ITEM_RADIUS, 36, 24),
     rareMaterial: rareMaterials(),
     glowMap: CAN_PAINT ? new THREE.CanvasTexture(paintGlow()) : null,
