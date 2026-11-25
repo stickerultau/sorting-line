@@ -55,14 +55,14 @@ Then open http://localhost:5173.
 - **Marbles:** the collection. Twenty-four kinds in six sets and three tiers, each with four ranks.
 - **Records:** lifetime numbers and the stamp book.
 - **Time:** follows the clock on your device, or steps through morning, noon, sunset and night.
-- **Change view:** switches between the whole line and a close-up of the three stations.
+- **Change view:** switches between the whole line and a close-up of the stations.
 - **Detail:** `low` drops the depth blur, the lamp's shadows, the blur behind the overlay and the extra pixels of sharp screens. On either setting the game draws fewer pixels by itself when the machine cannot keep up, and tries the full size again later.
 - **Sound on / off:** sound starts after your first click, because browsers block it until then.
 - **H:** hides the overlay for recording. **Esc** closes a panel.
 
 With reduced motion set on the device, there are no flying coins, flashes, slow motion or buzzes; the sparks stay.
 
-Progress is saved in the browser every ten seconds. Rare marbles still on the belt are kept too. The line keeps earning while you are away, at half speed, for up to eight hours, and the jars it fills count toward your orders. **Start over**, at the foot of the upgrades panel, erases it.
+Progress is saved in the browser every ten seconds. Rare marbles still on the belt are kept too. The line keeps earning while you are away, at half speed, for up to eight hours (three quarters and twelve hours with the night shift), and the jars it fills count toward your orders. **Start over**, at the foot of the upgrades panel, erases it.
 
 Add these to the address:
 
@@ -80,7 +80,7 @@ Add these to the address:
 2. Press **H** to hide the overlay, and click once so the sound is on.
 3. Record the window. On Windows, **Win + Alt + R** starts and stops a recording of the active window.
 
-For TikTok, Shorts and Reels, make the window tall and narrow (9:16). The shelf then stacks into six short rows of bigger jars above the three stations. A wide window shows three long rows instead.
+For TikTok, Shorts and Reels, make the window tall and narrow (9:16). The shelf then stacks into six short rows of bigger jars above the stations. A wide window shows three long rows instead.
 
 ## What is here
 

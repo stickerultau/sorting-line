@@ -440,6 +440,8 @@ button:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
 .marble-grid .marble { padding: 10px 4px 8px; }
 .marble-grid .marble-ball { width: 46px; height: 46px; }
 .marble-grid .marble-name, .marble-grid .marble-count { overflow-wrap: anywhere; }
+.marble-grid .marble > * { max-width: 100%; }
+.marble-grid .marble-tier { font-size: 9px; letter-spacing: 0.04em; }
 
 /* Each set of four marbles has a heading across the grid. */
 .set-head {

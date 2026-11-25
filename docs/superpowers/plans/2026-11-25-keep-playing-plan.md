@@ -86,6 +86,7 @@ Built on 25 and 26 November 2026, with these differences from the list above:
 - **The magnet slows rare marbles to half speed.** Drifting toward the pointer does nothing on a phone.
 - **Sets give a bonus but no shelf decoration.** A full set adds 10% to every payment and shows in the collection.
 - **The star totals are 3, 40, 200, 700, 1,800, 4,000, 7,000 and 12,000.** Stars add up much faster than the first table assumed. With these totals the simulated half-hour-a-day player earned an unlock on days 1, 2, 3, 5, 7, 9, 11 and 13.
+- **The catcher always pays coins.** A missed lucky marble gives half of a coin gift, whatever it would have given.
 - **Only the next unlock is named.** The ones after it show as question marks.
 - **The lifetime numbers share a Records panel with the 52 stamps.**
 

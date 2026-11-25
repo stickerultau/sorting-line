@@ -487,7 +487,9 @@ function feed(state: SimState, events: SimEvent[]): void {
 }
 
 function newKind(state: SimState): ItemKind {
-  const { families, stations, maxRares } = state.config
+  const { families, stations } = state.config
+  // The magnet keeps each rare marble on the belt longer, so the belt may hold that many more of them.
+  const maxRares = state.config.maxRares / (has(state, 'magnet') ? state.config.magnetSlow : 1)
   state.created++
   // The recycle queue is empty whenever a new kind is made, so every rare marble in play is on the belt.
   const chance = rareChanceNow(state)

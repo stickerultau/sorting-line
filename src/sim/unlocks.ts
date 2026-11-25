@@ -11,10 +11,6 @@ const heldAt = (stars: number, id: UnlockId) => stars >= STARS[id]
 /** Whether this workshop's star total has earned an unlock. Stars never go down, so neither do unlocks. */
 export const has = (state: SimState, id: UnlockId) => heldAt(state.stars, id)
 
-/** The unlocks that come when a star total rises from `before` to `after`. */
-export const unlockedBetween = (before: number, after: number): Unlock[] =>
-  UNLOCKS.filter((unlock) => unlock.stars > before && unlock.stars <= after)
-
 /** The next unlock still to come, or null when all are held. */
 export const nextUnlock = (stars: number): Unlock | null => UNLOCKS.find((unlock) => unlock.stars > stars) ?? null
 

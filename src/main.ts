@@ -219,8 +219,8 @@ function apply(events: SimEvent[]): void {
   if (stamps.length > 0) {
     audio.order()
     const share = Math.round(state.config.stampBonus * 100)
-    if (stamps.length <= 2) {
-      for (const id of stamps) hud.toast('Stamp earned', `${STAMPS.find((stamp) => stamp.id === id)?.name} · +${share}% coins for good`, undefined, 'lucky')
+    if (stamps.length === 1) {
+      hud.toast('Stamp earned', `${STAMPS.find((stamp) => stamp.id === stamps[0])?.name} · +${share}% coins for good`, undefined, 'lucky')
     } else {
       hud.toast(`${stamps.length} stamps earned`, `+${stamps.length * share}% coins for good. See them under Records`, undefined, 'lucky')
     }
@@ -263,13 +263,14 @@ function apply(events: SimEvent[]): void {
 
 /**
  * Tells the player about every unlock held that they have not been told about: after a new workshop,
- * and on the first visit with a save from before unlocks existed.
+ * and on the first visit with a save from before unlocks existed. One notice, however many there are:
+ * only three notices fit on screen, and a new workshop and its stamps want the other two.
  */
 function announceUnlocks(): void {
   const fresh = UNLOCKS.filter((unlock, index) => index >= state.unlocksSeen && state.stars >= unlock.stars)
   if (fresh.length === 0) return
   state.unlocksSeen += fresh.length
-  if (fresh.length <= 2) for (const unlock of fresh) hud.toast(`Unlocked: ${unlock.name}`, unlock.blurb, undefined, 'lucky')
+  if (fresh.length === 1) hud.toast(`Unlocked: ${fresh[0].name}`, fresh[0].blurb, undefined, 'lucky')
   else hud.toast(`${fresh.length} unlocks`, `${fresh.map((unlock) => unlock.name).join(', ')}. See them under Upgrades`, undefined, 'lucky')
 }
 announceUnlocks()

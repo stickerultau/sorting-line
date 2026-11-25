@@ -4,7 +4,8 @@ import { nextGoal } from '../src/sim/goal'
 import { awayEarnings, parseSave, resume, toSave } from '../src/sim/save'
 import { catchLucky, claimOrder, createSim, feedInterval, flick, prestige, steadyIncome, steadyJarPay, steadyMultiplier, tick } from '../src/sim/sim'
 import { STAMPS } from '../src/sim/stamps'
-import { availableRares, configFor, has, setsComplete, unlockedBetween } from '../src/sim/unlocks'
+import { availableRares, configFor, has, setsComplete } from '../src/sim/unlocks'
+import { warmUp } from '../src/sim/warmup'
 import type { SimEvent, SimState } from '../src/sim/types'
 
 const NOW = 1_800_000_000_000
@@ -39,14 +40,14 @@ describe('unlocks at star totals', () => {
     expect(UNLOCKS[0].stars).toBeGreaterThanOrEqual(1)
   })
 
-  it('are held from the star total on, and a new workshop can bring several at once', () => {
+  it('are held from the star total on', () => {
     const state = createSim(DEFAULT_CONFIG, 3)
     expect(has(state, 'green')).toBe(false)
     state.stars = starsFor('green')
     expect(has(state, 'green')).toBe(true)
     expect(has(state, 'catcher')).toBe(false)
-    expect(unlockedBetween(0, starsFor('beads')).map((unlock) => unlock.id)).toEqual(['green', 'catcher', 'beads'])
-    expect(unlockedBetween(starsFor('beads'), starsFor('beads') + 1)).toEqual([])
+    state.stars = starsFor('night')
+    expect(UNLOCKS.every((unlock) => has(state, unlock.id))).toBe(true)
   })
 
   it('green and purple each add a colour and a jar station, spread along the belt', () => {
@@ -153,6 +154,20 @@ describe('unlocks at star totals', () => {
     expect(feedInterval(after)).toBeCloseTo(feedInterval(before) / 2, 9)
     const count = (state: SimState) => ofType(run(state, 60), 'spawned').length
     expect(count(after)).toBeGreaterThan(count(before) * 1.7)
+    // A fast feeder fills the belt past what a single chute may put on it, up to the twin chute's own limit.
+    const busiest = (state: SimState) => {
+      state.upgrades.feeder = 8
+      let most = 0
+      for (let t = 0; t < 60; t += 0.25) {
+        tick(state, 0.25)
+        most = Math.max(most, state.items.length)
+      }
+      return most
+    }
+    expect(busiest(lineWith(starsFor('twin') - 1))).toBeLessThanOrEqual(DEFAULT_CONFIG.maxOnBelt)
+    const most = busiest(lineWith(starsFor('twin')))
+    expect(most).toBeGreaterThan(DEFAULT_CONFIG.maxOnBelt * 1.5)
+    expect(most).toBeLessThanOrEqual(DEFAULT_CONFIG.maxOnBelt * DEFAULT_CONFIG.twinBelt)
   })
 
   it('the magnet slows rare marbles to half speed and leaves the rest alone', () => {
@@ -165,6 +180,39 @@ describe('unlocks at star totals', () => {
       expect(state.items[1].x).toBeCloseTo(quiet.beltSpeed * 0.5, 6)
       expect(state.items[0].x).toBeCloseTo(quiet.beltSpeed * 0.5 * share, 6)
     }
+  })
+
+  it('the magnet lets twice as many rare marbles ride the belt, so a line that only watches loses none', () => {
+    const riding = (stars: number) => {
+      const state = lineWith(stars, { ...DEFAULT_CONFIG, rareChance: 1 })
+      let most = 0
+      for (let t = 0; t < 20; t += 0.25) {
+        tick(state, 0.25)
+        most = Math.max(most, state.items.filter((item) => item.rare).length)
+      }
+      return most
+    }
+    expect(riding(starsFor('magnet') - 1)).toBe(DEFAULT_CONFIG.maxRares)
+    expect(riding(starsFor('magnet'))).toBe(DEFAULT_CONFIG.maxRares * 2)
+  })
+
+  it('the rehearsal before the first frame shelves no jars for good, hands out no golden jar and keeps stamps for the real game', () => {
+    const state = lineWith(starsFor('twin'))
+    state.upgrades.feeder = 8
+    state.upgrades.belt = 8
+    state.shelved = 95
+    state.config = { ...state.config, startShelved: 95 }
+    const seen: SimEvent[] = []
+    warmUp(state, 8, 1 / 32, (events) => seen.push(...events))
+    expect(ofType(seen, 'jarFull').length).toBeGreaterThan(2)
+    expect(ofType(seen, 'jarFull').some((event) => event.golden)).toBe(false)
+    expect(state.shelved).toBe(95)
+    expect(state.sorted).toBe(0)
+    expect(state.stamps.includes('jars-100')).toBe(false)
+    // The stamps the rehearsal reached are earned, and announced, on the first real step.
+    const first = ofType(tick(state, 0.25), 'stamp').map((event) => event.id)
+    expect(first).toContain('stars-1')
+    expect(first).not.toContain('jars-100')
   })
 
   it('the night shift pays three quarters of the usual earnings for up to twelve hours away', () => {

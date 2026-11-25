@@ -75,6 +75,7 @@ const NUMBERS: [string, (state: SimState) => number][] = [
   ['Sorted by hand', (s) => s.handSorted],
   ['Coins earned', (s) => s.earned],
   ['Orders finished', (s) => s.ordersDone],
+  ['Rare marbles caught', (s) => Object.values(s.collection).reduce((sum, caught) => sum + caught, 0)],
   ['Rare marbles caught by hand', (s) => s.rareByHand],
   ['Lucky marbles caught', (s) => s.luckyCaught],
   ['Longest chain', (s) => s.bestChain],
