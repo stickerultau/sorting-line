@@ -110,6 +110,29 @@ export const MASTERY_NAME = ['Not found yet', 'Found', 'Bronze', 'Silver', 'Gold
 /** Lasting share of extra coins for each rank of a marble, times its tier. */
 export const MASTERY_BONUS = 0.02
 
+/** A look for the workshop: colours only. Each one opens when the day card reaches its count of days played. */
+export type LookId = 'classic' | 'harbour' | 'terracotta' | 'lilac' | 'midnight'
+
+export interface Look {
+  id: LookId
+  name: string
+  /** Days played that open it. */
+  days: number
+  /** The wall, the body of the machine, the belt and the light of the lamps. */
+  wall: number
+  body: number
+  belt: number
+  lamp: number
+}
+
+export const LOOKS: Look[] = [
+  { id: 'classic', name: 'Classic', days: 0, wall: 0x7fa293, body: 0xf4eee2, belt: 0x2c2f34, lamp: 0xffb070 },
+  { id: 'harbour', name: 'Harbour', days: 3, wall: 0x6f8fb3, body: 0xeef3f6, belt: 0x1f3147, lamp: 0xbfe2ff },
+  { id: 'terracotta', name: 'Terracotta', days: 7, wall: 0xc47f5e, body: 0xf6e7d2, belt: 0x4a2f24, lamp: 0xffa24a },
+  { id: 'lilac', name: 'Lilac', days: 14, wall: 0x9d8fc6, body: 0xf5eef8, belt: 0x3d2b52, lamp: 0xff9ad2 },
+  { id: 'midnight', name: 'Midnight', days: 30, wall: 0x2c3654, body: 0x39405a, belt: 0x14161c, lamp: 0xa890ff },
+]
+
 /** What an order asks for: full jars, full jars of one colour, items sorted by hand, rare marbles caught, or beads put in jars. */
 export type OrderKind = 'jars' | 'colour' | 'hand' | 'catch' | 'beads'
 export const ORDER_KINDS: OrderKind[] = ['jars', 'colour', 'hand', 'catch', 'beads']
@@ -227,6 +250,13 @@ export interface SimConfig {
   /** With the night shift, time away pays this share for up to this many seconds. */
   nightRate: number
   nightCapSeconds: number
+  /** The order of the day is this many minutes of the line's work, and pays this many times an ordinary order of that size. */
+  dailyMinutes: number
+  dailyPay: number
+  /** The marble of the week turns up this many times as often as it otherwise would. */
+  weekBoost: number
+  /** Share of the rare marbles passing while nobody watches that the spotter arm catches. */
+  awayMarbleShare: number
 }
 
 export const DEFAULT_CONFIG: SimConfig = {
@@ -276,4 +306,8 @@ export const DEFAULT_CONFIG: SimConfig = {
   magnetSlow: 0.5,
   nightRate: 0.75,
   nightCapSeconds: 12 * 3600,
+  dailyMinutes: 25,
+  dailyPay: 3,
+  weekBoost: 3,
+  awayMarbleShare: 0.1,
 }

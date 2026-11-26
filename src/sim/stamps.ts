@@ -36,6 +36,8 @@ export const STAMPS: Stamp[] = [
   ...marks('gold', (n, count) => `${n} ${plural(count, 'marble', 'marbles')} at gold rank`, [1, 6, 12], gold),
   ...marks('byhand', (n) => `${n} rare marbles caught by hand`, [10, 100, 1_000], (s) => s.rareByHand),
   ...marks('sets', (n, count) => `${n} full ${plural(count, 'set', 'sets')} of marbles`, [1, 3, 6], setsComplete),
+  ...marks('days', (n) => `${n} days played`, [3, 7, 14, 30], (s) => s.days),
+  ...marks('daily', (n, count) => `${n} ${plural(count, 'order', 'orders')} of the day finished`, [1, 7, 30], (s) => s.dailyDone),
   { id: 'both-at-once', name: 'A rush and a frenzy at the same time', hidden: true, earned: (s) => s.rushLeft > 0 && s.frenzyLeft > 0 },
   { id: 'clean-board', name: 'Every order finished at once', hidden: true, earned: (s) => s.orders.length > 0 && s.orders.every((order) => order.have >= order.need) },
   { id: 'deep-pockets', name: 'A million coins in hand', hidden: true, earned: (s) => s.coins >= 1_000_000 },

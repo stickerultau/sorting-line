@@ -1,5 +1,5 @@
-import { COLOUR_HEX, ORDER_KINDS, RARES, UNLOCKS, UPGRADES, type ColourId, type OrderKind, type RareId, type SimConfig, type UpgradeId } from '../content/content'
-import { countTowardOrders, createSim, feedInterval, jarAverage, rushSeconds, steadyJarPay } from './sim'
+import { COLOUR_HEX, LOOKS, ORDER_KINDS, RARES, UNLOCKS, UPGRADES, type ColourId, type LookId, type OrderKind, type RareId, type SimConfig, type UpgradeId } from '../content/content'
+import { awayCatches, catchUnwatched, countTowardOrders, createSim, feedInterval, jarAverage, rushSeconds, steadyJarPay } from './sim'
 import { STAMPS } from './stamps'
 import { configFor, has } from './unlocks'
 import type { Order, SimState } from './types'
@@ -37,12 +37,28 @@ export interface SaveData {
   workshops: number
   stamps: string[]
   unlocksSeen: number
+  day: number
+  days: number
+  /** Null when there is none, or none that can be read. */
+  daily: Order | null
+  dailyDay: number
+  dailyDone: number
+  look: LookId
 }
 
+/** What the line did while nobody was watching. */
 export interface Away {
   seconds: number
+  /** The part of that time the line kept running: time away only counts up to a limit. */
+  counted: number
   jars: number
+  /** Everything paid: for the jars and for the marbles. */
   coins: number
+  /** Rare marbles the spotter arm caught, and the kinds among them found for the first time. */
+  marbles: number
+  found: RareId[]
+  /** Orders now finished and waiting to be claimed, the order of the day among them. */
+  orders: number
 }
 
 /** Shorter absences earn nothing: a page reload should not pay out. */
@@ -76,6 +92,12 @@ export function toSave(state: SimState, now: number): SaveData {
     workshops: state.workshops,
     stamps: [...state.stamps],
     unlocksSeen: state.unlocksSeen,
+    day: state.day,
+    days: state.days,
+    daily: state.daily && { ...state.daily },
+    dailyDay: state.dailyDay,
+    dailyDone: state.dailyDone,
+    look: state.look,
   }
 }
 
@@ -95,25 +117,35 @@ function seconds(value: unknown): number {
   return typeof value === 'number' && value > 0 ? Math.min(value, MAX_COUNT) : 0
 }
 
+/** Reads one order in a save, or null if it makes no sense. */
+function parseOrder(entry: unknown): Order | null {
+  if (typeof entry !== 'object' || entry === null) return null
+  const { kind, colour, need, have, worth } = entry as Record<string, unknown>
+  const size = count(need)
+  if (!ORDER_KINDS.includes(kind as OrderKind) || size < 1) return null
+  if (typeof worth !== 'number' || !(worth > 0) || worth > MAX_COUNT) return null
+  const order: Order = { kind: kind as OrderKind, need: size, have: count(have, size), worth }
+  if (order.kind === 'colour') {
+    if (typeof colour !== 'string' || !Object.hasOwn(COLOUR_HEX, colour)) return null
+    order.colour = colour as ColourId
+  }
+  return order
+}
+
 /** Reads the orders in a save. One that makes no sense spoils the lot: the line deals new ones instead. */
 function parseOrders(raw: unknown): Order[] | null {
   if (!Array.isArray(raw)) return null
   const orders: Order[] = []
   for (const entry of raw) {
-    if (typeof entry !== 'object' || entry === null) return null
-    const { kind, colour, need, have, worth } = entry as Record<string, unknown>
-    const size = count(need)
-    if (!ORDER_KINDS.includes(kind as OrderKind) || size < 1) return null
-    if (typeof worth !== 'number' || !(worth > 0) || worth > MAX_COUNT) return null
-    const order: Order = { kind: kind as OrderKind, need: size, have: count(have, size), worth }
-    if (order.kind === 'colour') {
-      if (typeof colour !== 'string' || !Object.hasOwn(COLOUR_HEX, colour)) return null
-      order.colour = colour as ColourId
-    }
+    const order = parseOrder(entry)
+    if (!order) return null
     orders.push(order)
   }
   return orders
 }
+
+/** No clock reads a day beyond this: about the year 29,000. */
+const MAX_DAY = 1e7
 
 /** Reads a stored save. Returns null if it is not one; repairs numbers that make no sense. */
 export function parseSave(raw: unknown): SaveData | null {
@@ -156,6 +188,12 @@ export function parseSave(raw: unknown): SaveData | null {
     rushes: count(data.rushes),
     workshops: count(data.workshops),
     unlocksSeen: count(data.unlocksSeen, UNLOCKS.length),
+    day: count(data.day, MAX_DAY),
+    days: count(data.days, MAX_DAY),
+    daily: parseOrder(data.daily),
+    dailyDay: count(data.dailyDay, MAX_DAY),
+    dailyDone: count(data.dailyDone, MAX_DAY),
+    look: LOOKS.find((look) => look.id === data.look)?.id ?? LOOKS[0].id,
     stamps: STAMPS.map((stamp) => stamp.id).filter((id) => Array.isArray(data.stamps) && data.stamps.includes(id)),
     shelved: count(data.shelved),
     sorted: count(data.sorted),
@@ -164,12 +202,20 @@ export function parseSave(raw: unknown): SaveData | null {
   }
 }
 
-/** What the line earns while nobody is watching: full jars at the away rate, up to the cap. */
-export function awayEarnings(state: SimState, seconds: number): { jars: number; coins: number } {
+/** The part of a time away that the line keeps running for, and the share of its usual speed it runs at. */
+function awayRun(state: SimState, seconds: number): { counted: number; rate: number } {
   const { config } = state
   const night = has(state, 'night')
-  const counted = Math.min(Math.max(seconds, 0), night ? config.nightCapSeconds : config.awayCapSeconds)
-  const jars = Math.floor((counted * (night ? config.nightRate : config.awayRate)) / feedInterval(state) / config.jarCapacity)
+  return {
+    counted: Math.min(Math.max(seconds, 0), night ? config.nightCapSeconds : config.awayCapSeconds),
+    rate: night ? config.nightRate : config.awayRate,
+  }
+}
+
+/** What the line earns while nobody is watching: full jars at the away rate, up to the cap. */
+export function awayEarnings(state: SimState, seconds: number): { jars: number; coins: number } {
+  const { counted, rate } = awayRun(state, seconds)
+  const jars = Math.floor((counted * rate) / feedInterval(state) / state.config.jarCapacity)
   return { jars, coins: Math.round(jars * steadyJarPay(state) * jarAverage(state)) }
 }
 
@@ -192,7 +238,20 @@ export function payAway(state: SimState, seconds: number): Away | null {
   if (state.config.families.includes('bead')) {
     countTowardOrders(state, 'beads', undefined, Math.floor((jars * state.config.jarCapacity) / state.config.families.length))
   }
-  return { seconds, jars, coins }
+  // The spotter arm keeps working too, at the same share of the line's speed.
+  const { counted, rate } = awayRun(state, seconds)
+  const marbles = awayCatches(state, counted * rate)
+  const caught = catchUnwatched(state, marbles)
+  const done = (order: Order | null) => order !== null && order.have >= order.need
+  return {
+    seconds,
+    counted,
+    jars,
+    coins: coins + caught.coins,
+    marbles,
+    found: caught.found,
+    orders: state.orders.filter(done).length + (done(state.daily) ? 1 : 0),
+  }
 }
 
 /** Starts the line from a save, or fresh when there is none, and pays for the time away. */
@@ -222,12 +281,19 @@ export function resume(config: SimConfig, seed: number, data: SaveData | null, n
   state.workshops = data.workshops
   state.stamps = [...data.stamps]
   state.unlocksSeen = data.unlocksSeen
+  state.day = data.day
+  state.days = data.days
+  state.dailyDay = data.dailyDay
+  state.dailyDone = data.dailyDone
+  // A look is kept only if the days played have opened it.
+  state.look = LOOKS.find((look) => look.id === data.look && data.days >= look.days)?.id ?? LOOKS[0].id
   state.recycle.push(...data.rares.map((rare) => ({ family: 'marble' as const, colour: config.stations[0].colour, rare })))
   // Saved orders are kept only if this line can still do every one of them.
   const fits = (order: Order) =>
     (order.kind !== 'colour' || config.stations.some((station) => station.colour === order.colour)) &&
     (order.kind !== 'beads' || config.families.includes('bead'))
   if (data.orders?.length === config.orderSlots && data.orders.every(fits)) state.orders = data.orders.map((order) => ({ ...order }))
+  if (data.daily && fits(data.daily)) state.daily = { ...data.daily }
 
   const away = payAway(state, Math.floor((now - data.savedAt) / 1000))
   if (away) state.config = { ...state.config, startShelved: state.shelved }

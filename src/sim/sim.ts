@@ -1,4 +1,5 @@
-import { LUCKY_GIFTS, MASTERY_AT, MASTERY_BONUS, ORDER_KINDS, RARES, TIER_WEIGHT, UPGRADES, type ColourId, type LuckyGift, type OrderKind, type RareId, type SimConfig, type UpgradeId } from '../content/content'
+import { LOOKS, LUCKY_GIFTS, MASTERY_AT, MASTERY_BONUS, ORDER_KINDS, RARES, TIER_WEIGHT, UPGRADES, type ColourId, type LookId, type LuckyGift, type OrderKind, type RareId, type SimConfig, type UpgradeId } from '../content/content'
+import { looksOpen, weeklyRare } from './days'
 import { nextRandom } from './rng'
 import { STAMPS } from './stamps'
 import { availableRares, configFor, has, setsComplete } from './unlocks'
@@ -26,6 +27,10 @@ const DRY_FROM = 2
 const DRY_TO = 3
 /** A new player's first orders are short, so the first reward comes early. */
 const STARTER_ORDERS = 3
+/** What the order of the day can ask for. The kind turns with the day. */
+const DAILY_KINDS: OrderKind[] = ['jars', 'hand', 'colour', 'beads']
+/** More marbles than this are never caught in one stretch of time away. */
+const MAX_AWAY_CATCHES = 2_000
 
 const noUpgrades = () => Object.fromEntries(UPGRADES.map((upgrade) => [upgrade.id, 0])) as Record<UpgradeId, number>
 
@@ -68,6 +73,12 @@ export function createSim(config: SimConfig, seed: number): SimState {
     workshops: 0,
     stamps: [],
     unlocksSeen: 0,
+    day: 0,
+    days: 0,
+    daily: null,
+    dailyDay: 0,
+    dailyDone: 0,
+    look: LOOKS[0].id,
   }
   dealOrders(state)
   return state
@@ -151,6 +162,7 @@ export function prestige(state: SimState): number {
   if (starsWaiting(state) < 1) return 0
   // Finished orders are paid first: their coins count toward this run's stars instead of being lost.
   state.orders.forEach((_, slot) => claimOrder(state, slot))
+  claimDaily(state)
   const stars = starsWaiting(state)
   state.stars += stars
   state.workshops++
@@ -245,7 +257,16 @@ function newOrder(state: SimState, others: Order[]): Order {
   )
   const kind = open[Math.floor(orderRandom(state) * open.length)] ?? 'jars'
   const minutes = state.ordersDone < STARTER_ORDERS ? 0.6 + orderRandom(state) * 0.6 : 1.5 + orderRandom(state) * 2
-  const jarsPerMinute = 60 / feedInterval(state) / config.jarCapacity
+  return sizedOrder(state, kind, minutes, (colours) => Math.floor(orderRandom(state) * colours))
+}
+
+/** Full jars this line fills in a minute when nothing holds it up. */
+const jarsAMinute = (state: SimState) => 60 / feedInterval(state) / state.config.jarCapacity
+
+/** An order of one kind, sized to this many minutes of the line's work. `pickColour` chooses among that many stations. */
+function sizedOrder(state: SimState, kind: OrderKind, minutes: number, pickColour: (colours: number) => number): Order {
+  const { config } = state
+  const jarsPerMinute = jarsAMinute(state)
   if (kind === 'jars') {
     const need = Math.max(5, Math.round((jarsPerMinute * minutes) / 5) * 5)
     return { kind, need, have: 0, worth: need * 0.5 }
@@ -253,7 +274,7 @@ function newOrder(state: SimState, others: Order[]): Order {
   if (kind === 'colour') {
     const colours = config.stations.length
     const need = Math.max(2, Math.round((jarsPerMinute * minutes) / colours))
-    const colour = config.stations[Math.floor(orderRandom(state) * colours)].colour
+    const colour = config.stations[pickColour(colours)].colour
     return { kind, colour, need, have: 0, worth: need * colours * 0.5 }
   }
   if (kind === 'hand') {
@@ -277,6 +298,10 @@ export function countTowardOrders(state: SimState, kind: OrderKind, colour: Colo
     order.have = Math.min(order.need, order.have + amount)
     if (order.have === order.need) events?.push({ type: 'orderReady', slot })
   })
+  const daily = state.daily
+  if (!daily || daily.kind !== kind || daily.have >= daily.need || (kind === 'colour' && daily.colour !== colour)) return
+  daily.have = Math.min(daily.need, daily.have + amount)
+  if (daily.have === daily.need) events?.push({ type: 'dailyReady' })
 }
 
 /** Pays a finished order and puts a new one in its place. Returns the coins paid, or null if it is not finished. */
@@ -287,6 +312,79 @@ export function claimOrder(state: SimState, slot: number): number | null {
   state.ordersDone++
   state.orders[slot] = newOrder(state, state.orders.filter((_, index) => index !== slot))
   return coins
+}
+
+// The calendar: days played, the order of the day and the look.
+
+/** The order for a day: a long one, of a kind and colour that turn with the day. Every kind pays the same. */
+function dayOrder(state: SimState, day: number): Order {
+  const { config } = state
+  const kinds = DAILY_KINDS.filter((kind) => kind !== 'beads' || config.families.includes('bead'))
+  const order = sizedOrder(state, kinds[day % kinds.length], config.dailyMinutes, (colours) => day % colours)
+  return { ...order, worth: jarsAMinute(state) * config.dailyMinutes * 0.5 * config.dailyPay }
+}
+
+/**
+ * Tells the line what calendar day it is. A day later than the last one played is counted on the day card,
+ * and brings an order of the day unless one is still open. Returns whether a new day was counted.
+ * The rules have no clock of their own: whoever runs them passes the day in.
+ */
+export function startDay(state: SimState, day: number): boolean {
+  if (day === state.day) return false
+  const later = day > state.day
+  // A clock that was set back is followed, but counts nothing.
+  state.day = day
+  if (!later) return false
+  state.days++
+  if (!state.daily && day !== state.dailyDay) state.daily = dayOrder(state, day)
+  return true
+}
+
+/** Pays the order of the day once it is finished. The next one comes with the next day. Returns the coins paid, or null if it is not finished. */
+export function claimDaily(state: SimState): number | null {
+  const daily = state.daily
+  if (!daily || daily.have < daily.need) return null
+  const coins = pay(state, orderReward(state, daily))
+  state.dailyDone++
+  state.dailyDay = state.day
+  state.daily = null
+  return coins
+}
+
+/** Chooses a look. Returns false, changing nothing, if the days played have not opened it. */
+export function setLook(state: SimState, id: LookId): boolean {
+  if (!looksOpen(state).some((look) => look.id === id)) return false
+  state.look = id
+  return true
+}
+
+/**
+ * Rare marbles the spotter arm catches while the line runs unwatched for this many seconds: a share of those
+ * that come by, and never more than the belt can carry. None without the arm.
+ */
+export function awayCatches(state: SimState, seconds: number): number {
+  if (state.upgrades.spotter < 1 || !(seconds > 0)) return 0
+  const { config } = state
+  // The magnet doubles the marbles on the belt and halves their speed, so it changes nothing here.
+  const carried = (config.maxRares * beltSpeed(state)) / config.beltLength
+  const passing = Math.min(calmRareChance(state) / feedInterval(state), carried)
+  return Math.min(MAX_AWAY_CATCHES, Math.floor(seconds * passing * config.awayMarbleShare))
+}
+
+/** Catches this many rare marbles the way the spotter arm does. Returns the coins paid and the kinds found for the first time. */
+export function catchUnwatched(state: SimState, count: number): { coins: number; found: RareId[] } {
+  let coins = 0
+  const found: RareId[] = []
+  for (let n = 0; n < count; n++) {
+    const rare = pickRare(state, nextRandom(state))
+    const kind = RARES.find((r) => r.id === rare)!
+    const owned = state.collection[rare] ?? 0
+    coins += pay(state, Math.round(kind.coins * lidFactor(state) * steadyMultiplier(state)))
+    state.collection[rare] = owned + 1
+    if (owned === 0) found.push(rare)
+    countTowardOrders(state, 'catch', undefined, 1)
+  }
+  return { coins, found }
 }
 
 // The lucky marble.
@@ -507,9 +605,11 @@ function newKind(state: SimState): ItemKind {
 /** The rare marble for a number from 0 to 1, among those this workshop can deal: the commoner tiers take more of that range. */
 function pickRare(state: SimState, random: number): RareId {
   const open = availableRares(state)
-  let roll = random * open.reduce((sum, rare) => sum + TIER_WEIGHT[rare.tier], 0)
+  const weekly = weeklyRare(state)
+  const weight = (rare: (typeof open)[number]) => TIER_WEIGHT[rare.tier] * (rare === weekly ? state.config.weekBoost : 1)
+  let roll = random * open.reduce((sum, rare) => sum + weight(rare), 0)
   for (const rare of open) {
-    roll -= TIER_WEIGHT[rare.tier]
+    roll -= weight(rare)
     if (roll < 0) return rare.id
   }
   return open[open.length - 1].id

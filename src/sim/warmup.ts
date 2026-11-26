@@ -12,6 +12,7 @@ export function warmUp(state: SimState, seconds: number, dt: number, each: (even
   // Stamps earned in the rehearsal are handed back, so they are earned again, and announced, once the game is on show.
   const stamps = [...state.stamps]
   const orders = state.orders.map((order) => ({ ...order }))
+  const daily = state.daily && { ...state.daily }
   const rares = state.recycle.filter((kind) => kind.rare)
   state.recycle = state.recycle.filter((kind) => !kind.rare)
   // No jar filled here is golden: the jar count is handed back below, so the golden one is still to come.
@@ -32,4 +33,5 @@ export function warmUp(state: SimState, seconds: number, dt: number, each: (even
   state.earned = earned
   state.runEarned = runEarned
   state.orders = orders
+  state.daily = daily
 }

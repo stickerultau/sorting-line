@@ -1,4 +1,4 @@
-import type { ColourId, FamilyId, LuckyGift, OrderKind, RareId, SimConfig, UpgradeId } from '../content/content'
+import type { ColourId, FamilyId, LookId, LuckyGift, OrderKind, RareId, SimConfig, UpgradeId } from '../content/content'
 
 export interface ItemKind {
   family: FamilyId
@@ -95,6 +95,18 @@ export interface SimState {
   stamps: string[]
   /** How many unlocks the player has been told about. The rules do not use it; it only stops a notice from showing twice. */
   unlocksSeen: number
+  /** The calendar day last played, counted in days since 1970 where the player is. 0 before the calendar has started. */
+  day: number
+  /** Calendar days played, ever. It never goes down, and a missed day costs nothing. */
+  days: number
+  /** The order of the day. It never runs out. Null before the first day and once it has been claimed. */
+  daily: Order | null
+  /** The day the last order of the day was claimed. The next one comes with the first day after it. */
+  dailyDay: number
+  /** Orders of the day ever claimed. */
+  dailyDone: number
+  /** The look the player has chosen. The rules do not use it. */
+  look: LookId
 }
 
 export type SimEvent =
@@ -105,6 +117,8 @@ export type SimEvent =
   | { type: 'jarReady'; station: number }
   | { type: 'recycled'; item: BeltItem }
   | { type: 'orderReady'; slot: number }
+  /** The order of the day is finished and can be claimed. */
+  | { type: 'dailyReady' }
   | { type: 'rushStarted'; seconds: number }
   | { type: 'rushEnded' }
   | { type: 'luckyArrived'; seconds: number }

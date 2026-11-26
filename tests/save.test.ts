@@ -80,7 +80,7 @@ describe('time away', () => {
 
   it('pays into a running line, for a tab that was left in the background', () => {
     const state = played()
-    expect(payAway(state, HOUR)).toEqual({ seconds: HOUR, jars: 600, coins: 7200 })
+    expect(payAway(state, HOUR)).toMatchObject({ seconds: HOUR, jars: 600, coins: 7200 })
     expect(state.coins).toBe(432 + 7200)
     expect(state.earned).toBe(900 + 7200)
     expect(state.shelved).toBe(57 + 600)
