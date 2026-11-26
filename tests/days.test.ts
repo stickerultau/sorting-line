@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { DEFAULT_CONFIG, LOOKS, RARES, type SimConfig } from '../src/content/content'
+import { DEFAULT_CONFIG, LOOKS, RARES, TIER_WEIGHT, type SimConfig } from '../src/content/content'
 import { dayOf, looksOpen, weekOf, weeklyRare } from '../src/sim/days'
 import { parseSave, payAway, resume, toSave } from '../src/sim/save'
 import { claimDaily, createSim, giveLucky, orderReward, prestige, setLook, startDay, steadyJarPay, tick } from '../src/sim/sim'
@@ -132,8 +132,18 @@ describe('the order of the day', () => {
       startDay(state, MONDAY + n)
       return [state.daily!.kind, state.daily!.worth] as const
     })
-    expect(new Set(worths.map(([kind]) => kind))).toEqual(new Set(['jars', 'hand', 'colour', 'beads']))
+    expect(new Set(worths.map(([kind]) => kind))).toEqual(new Set(['jars', 'colour', 'beads']))
     expect(new Set(worths.map(([, worth]) => worth)).size).toBe(1)
+  })
+
+  it('is always work the line does by itself, so one left alone can never block the next', () => {
+    for (let n = 0; n < 12; n++) {
+      const state = createSim(configFor(QUIET, 200), 1)
+      state.stars = 200
+      startDay(state, MONDAY + n)
+      payAway(state, 8 * 3600)
+      expect(state.daily!.have).toBe(state.daily!.need)
+    }
   })
 
   it('never asks for beads on a line that has none', () => {
@@ -173,6 +183,32 @@ describe('the order of the day', () => {
     expect(state.daily).not.toBeNull()
   })
 
+  it("one left over from an earlier day, once claimed, makes room for the new one at once", () => {
+    const state = createSim(QUIET, 1)
+    startDay(state, MONDAY)
+    const first = state.daily!
+    first.have = first.need // finished overnight
+    startDay(state, MONDAY + 1)
+    expect(state.daily).toBe(first)
+    expect(claimDaily(state)).not.toBeNull()
+    expect(state.daily).not.toBeNull()
+    expect(state.daily).not.toBe(first)
+    expect(state.daily!.have).toBe(0)
+    // That one is today's: claiming it too brings no third.
+    state.daily!.have = state.daily!.need
+    claimDaily(state)
+    expect(state.daily).toBeNull()
+    expect(state.dailyDone).toBe(2)
+  })
+
+  it('is sized for the line before any upgrade, so a new workshop does not stretch it', () => {
+    const plain = createSim(QUIET, 1)
+    const upgraded = createSim(QUIET, 1)
+    upgraded.upgrades.feeder = 8
+    for (const state of [plain, upgraded]) startDay(state, MONDAY)
+    expect(upgraded.daily).toEqual(plain.daily)
+  })
+
   it('never runs out: an unfinished one stays, with its progress, however many days go by', () => {
     const state = createSim(QUIET, 1)
     startDay(state, MONDAY)
@@ -206,7 +242,13 @@ describe('the order of the day', () => {
   it('the rehearsal before the first frame does not move it', () => {
     const state = createSim(QUIET, 1)
     startDay(state, MONDAY)
-    warmUp(state, 8, 1 / 32, () => {})
+    // A fast line, so the rehearsal does fill jars.
+    state.upgrades.feeder = 8
+    state.upgrades.belt = 8
+    const seen: SimEvent[] = []
+    warmUp(state, 8, 1 / 32, (events) => seen.push(...events))
+    expect(state.daily!.kind).toBe('jars')
+    expect(ofType(seen, 'jarFull').length).toBeGreaterThan(0)
     expect(state.daily!.have).toBe(0)
   })
 })
@@ -232,7 +274,7 @@ describe('the marble of the week', () => {
       state.stars = stars
       const open = availableRares(state)
       const seen = new Set<string>()
-      for (let week = 0; week < open.length; week++) {
+      for (let week = 0; week < RARES.length; week++) {
         startDay(state, MONDAY + week * 7)
         seen.add(weeklyRare(state)!.id)
       }
@@ -240,17 +282,40 @@ describe('the marble of the week', () => {
     }
   })
 
-  it('turns up three times as often as another marble of its tier, and the others still come', () => {
-    const state = createSim({ ...DEFAULT_CONFIG, luckyShower: 6_000 }, 5)
-    startDay(state, MONDAY)
-    const weekly = weeklyRare(state)!
-    giveLucky(state, 'shower', [])
-    const count = (id: string) => state.recycle.filter((kind) => kind.rare === id).length
-    const peer = availableRares(state).find((rare) => rare.tier === weekly.tier && rare.id !== weekly.id)!
-    const ratio = count(weekly.id) / count(peer.id)
-    expect(ratio).toBeGreaterThan(DEFAULT_CONFIG.weekBoost * 0.75)
-    expect(ratio).toBeLessThan(DEFAULT_CONFIG.weekBoost * 1.3)
-    for (const rare of availableRares(state)) expect(count(rare.id)).toBeGreaterThan(0)
+  it('a marble the workshop already had stays the marble of the week when an unlock brings more', () => {
+    let kept = 0
+    for (let week = 0; week < RARES.length; week++) {
+      const state = createSim(DEFAULT_CONFIG, 1)
+      startDay(state, MONDAY + week * 7)
+      const before = weeklyRare(state)!
+      state.stars = 7_000 // every set is open now
+      const after = weeklyRare(state)!
+      // It only changes when the week's turn belongs to a marble that has just arrived.
+      if (after === before) kept++
+      else expect(availableRares(createSim(DEFAULT_CONFIG, 1))).not.toContain(after)
+    }
+    expect(kept).toBeGreaterThanOrEqual(12)
+  })
+
+  it('turns up three times as often as it would in any other week, whatever its tier, and the others still come', () => {
+    // Three weeks whose marbles are of the three tiers.
+    const tiersSeen = new Set<number>()
+    for (let week = 0; week < RARES.length; week++) {
+      const state = createSim({ ...DEFAULT_CONFIG, luckyShower: 20_000 }, 5)
+      startDay(state, MONDAY + week * 7)
+      const weekly = weeklyRare(state)!
+      if (tiersSeen.has(weekly.tier)) continue
+      tiersSeen.add(weekly.tier)
+      giveLucky(state, 'shower', [])
+      const count = (id: string) => state.recycle.filter((kind) => kind.rare === id).length
+      const open = availableRares(state)
+      const usual = TIER_WEIGHT[weekly.tier] / open.reduce((sum, rare) => sum + TIER_WEIGHT[rare.tier], 0)
+      const share = count(weekly.id) / 20_000
+      expect(share).toBeGreaterThan(usual * DEFAULT_CONFIG.weekBoost * 0.88)
+      expect(share).toBeLessThan(usual * DEFAULT_CONFIG.weekBoost * 1.12)
+      for (const rare of open) expect(count(rare.id)).toBeGreaterThan(0)
+    }
+    expect(tiersSeen.size).toBe(3)
   })
 
   it('without a calendar the marbles come as they always did', () => {
@@ -275,6 +340,38 @@ describe('time away, as the welcome-back card reports it', () => {
     expect(paid.marbles).toBe(Math.floor(passed * DEFAULT_CONFIG.awayMarbleShare))
     expect(paid.marbles).toBeGreaterThan(10)
     expect(Object.values(state.collection).reduce((sum, n) => sum + n, 0)).toBe(paid.marbles)
+  })
+
+  it('the marbles caught count toward an order that asks for them', () => {
+    const state = createSim(DEFAULT_CONFIG, 1)
+    state.upgrades.spotter = 1
+    state.orders[0] = { kind: 'catch', need: 3, have: 0, worth: 12 }
+    away(state, 8)
+    expect(state.orders[0].have).toBe(3)
+  })
+
+  it('the arm catches no more than the belt can carry, and never more than two thousand', () => {
+    // Every item a rare marble: the belt holds three at a time, each for one trip.
+    const crowded: SimConfig = { ...DEFAULT_CONFIG, rareChance: 1 }
+    const state = createSim(crowded, 1)
+    state.upgrades.spotter = 1
+    const carried = (crowded.maxRares * crowded.beltSpeed) / crowded.beltLength
+    expect(away(state, 8).marbles).toBe(Math.floor(8 * 3600 * crowded.awayRate * carried * crowded.awayMarbleShare))
+
+    const greedy = createSim({ ...crowded, awayMarbleShare: 1 }, 1)
+    greedy.upgrades.spotter = 1
+    expect(away(greedy, 8).marbles).toBe(2_000)
+  })
+
+  it('a night away is paid once: opening the page a second time brings no more marbles', () => {
+    const state = createSim(DEFAULT_CONFIG, 1)
+    state.upgrades.spotter = 1
+    const first = resume(DEFAULT_CONFIG, 2, parseSave(JSON.parse(JSON.stringify(toSave(state, NOW)))), NOW + 8 * HOUR)
+    expect(first.away!.marbles).toBeGreaterThan(10)
+    const again = resume(DEFAULT_CONFIG, 3, parseSave(JSON.parse(JSON.stringify(toSave(first.state, NOW + 8 * HOUR)))), NOW + 8 * HOUR + 5_000)
+    expect(again.away).toBeNull()
+    expect(again.state.collection).toEqual(first.state.collection)
+    expect(again.state.coins).toBe(first.state.coins)
   })
 
   it('without the arm no marble is caught', () => {

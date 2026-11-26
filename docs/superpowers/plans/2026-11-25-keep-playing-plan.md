@@ -102,6 +102,25 @@ Goal: players return the next day. Size: medium.
 
 Not included: notifications. They need a server and a permission prompt.
 
+Built on 26 November 2026, with these differences from the list above:
+
+- **The order of the day never runs out.** An unfinished one waits, with its progress, for as long as it takes. Each calendar day brings one at most. An order that ended at midnight would have been a deadline, and this plan has none.
+- **It asks only for work the line does by itself:** jars, jars of one colour, or beads. An order that needed sorting by hand and never ran out could block every later one for a player who only watches. So it is less "20 to 30 minutes of play" than a long job to come back to.
+- **It is sized for a line with no upgrades.** It lasts through new workshops, so its size must not depend on the upgrades of one of them.
+- **It pays about 4% of what a daily player earns.** In the simulated two weeks the half-hour player finished one every day. It is a reward for coming back, not a second income.
+- **Stamps mark the days.** There is one at 3, 7, 14 and 30 days played, and one at 1, 7 and 30 orders of the day.
+- **A look is a whole colour scheme.** Each one sets the wall, the machine, the belt and the lamps. Lids keep the colour of their station, because that colour tells the player which jar is which.
+- **The report pays at once.** Coins and jars for time away are in the wallet before the card shows, so closing the page loses nothing. The tap claims the finished orders. A time away under ten minutes gets a passing notice, as before.
+- **The spotter arm catches one in ten of the rare marbles that pass while you are away.** The report had a line for these marbles, and until now time away caught none.
+- **The marble of the week is chosen among the marbles your workshop can deal.** Its chance is three times the usual one. An unlock in the middle of a week can change the choice, in the weeks that belong to a marble that has just arrived.
+- **The icon is drawn when the game is built.** The build writes the picture files, the manifest and the offline worker. No picture file is kept in the project.
+
+Known and left as it is:
+
+- A device clock set back and then forward counts the same day twice on the day card. A player who flies west across midnight gains one day. Nothing else is affected.
+- The overlay code (the card, the held notices, the calendar check) has no automated tests. It was checked by hand in the browser at desktop and phone sizes.
+- The game was started with no network on this computer, in Chrome, from a local copy of the build. It was not installed on a phone.
+
 ## Stage 4: find out if it works
 
 Goal: replace guessing with numbers. Size: small.

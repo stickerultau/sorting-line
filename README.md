@@ -19,9 +19,16 @@ The workshop keeps changing as stars add up:
 
 - **Unlocks (days):** eight lasting changes come at star totals. In order: a green station, a catcher for missed lucky marbles, beads, golden jars, a twin chute, a magnet that slows rare marbles, a purple station and a night shift. The upgrades panel shows the ones you hold and the next one; the rest stay a secret.
 - **Marble sets (days to weeks):** the 24 rare marbles come in six sets of four. A full set adds 10% to every payment. Three sets arrive with unlocks.
-- **Stamps (minutes to months):** 52 marks for things done, such as 1,000 jars shelved or a chain of 50. Each one adds 1% to every payment. Four are hidden until earned.
+- **Stamps (minutes to months):** 59 marks for things done, such as 1,000 jars shelved or a chain of 50. Each one adds 1% to every payment. Four are hidden until earned.
 
-Nothing here can be bought, and nothing is lost by waiting. The only thing with a clock on it is the lucky marble, and missing one loses nothing you had.
+There are reasons to come back, and none of them punishes a day off:
+
+- **Order of the day:** one long order, about 25 minutes of work for a line with no upgrades. It asks for jars, jars of one colour or beads, which the line fills by itself, and pays three times an ordinary order of its size. It never runs out: an unfinished one waits for you. Each calendar day brings one at most.
+- **Day card:** counts the days you have played, and never goes down. At 3, 7, 14 and 30 days it opens a new look for the workshop: the colours of the wall, the machine, the belt and the lamps. Choose one under Records.
+- **Marble of the week:** one rare marble turns up three times as often from Monday to Sunday. Every marble gets its turn, and the others still come.
+- **Welcome back:** after ten minutes or more away, a card shows what the line did: jars shelved, coins earned, rare marbles the spotter arm caught and orders that are finished. One tap claims those orders. The coins for the time away are already in the wallet when the card shows.
+
+Nothing here can be bought, and nothing is lost by waiting. The only thing with a countdown is the lucky marble, and missing one loses nothing you had. The calendar only ever adds: no order runs out and no count goes down.
 
 It started as the one-week clip prototype from the development plan (`../SORTING_LINE_DEVELOPMENT_PLAN.md`). Its job is still to be filmed and to be put in front of strangers.
 
@@ -53,7 +60,8 @@ Then open http://localhost:5173.
 - **Orders:** click a finished order to claim its coins.
 - **Upgrades:** spend coins on a quicker feeder, a faster belt, better lids, a luckier chute, a spotter arm that catches the rare marbles you miss, an order book and a longer rush. **New workshop** is at the foot of this panel.
 - **Marbles:** the collection. Twenty-four kinds in six sets and three tiers, each with four ranks.
-- **Records:** lifetime numbers and the stamp book.
+- **Records:** the day card and its looks, lifetime numbers and the stamp book.
+- **Install app:** shows in browsers that can install the game. Installed, it opens in its own window and starts with no network.
 - **Time:** follows the clock on your device, or steps through morning, noon, sunset and night.
 - **Change view:** switches between the whole line and a close-up of the stations.
 - **Detail:** `low` drops the depth blur, the lamp's shadows, the blur behind the overlay and the extra pixels of sharp screens. On either setting the game draws fewer pixels by itself when the machine cannot keep up, and tries the full size again later.
@@ -62,7 +70,7 @@ Then open http://localhost:5173.
 
 With reduced motion set on the device, there are no flying coins, flashes, slow motion or buzzes; the sparks stay.
 
-Progress is saved in the browser every ten seconds. Rare marbles still on the belt are kept too. The line keeps earning while you are away, at half speed, for up to eight hours (three quarters and twelve hours with the night shift), and the jars it fills count toward your orders. **Start over**, at the foot of the upgrades panel, erases it.
+Progress is saved in the browser every ten seconds. Rare marbles still on the belt are kept too. The line keeps earning while you are away, at half speed, for up to eight hours (three quarters and twelve hours with the night shift), and the jars it fills count toward your orders. With a spotter arm fitted, it also catches one in ten of the rare marbles that pass. **Start over**, at the foot of the upgrades panel, erases it.
 
 Add these to the address:
 
@@ -72,7 +80,8 @@ Add these to the address:
 | `?quality=low` | Starts with low detail |
 | `?fps` | Shows the frame rate and the pixel ratio the scene is drawn at |
 | `?fresh` | Plays without reading or writing a save |
-| `?seed=123` | The same seed always deals the same items. Plays without a save, like `?fresh` |
+| `?seed=123` | The same seed always deals the same items. Plays without a save, like `?fresh`, and keeps no calendar |
+| `?fresh&day=3` | Looks three days ahead on the calendar, to check the day card. Works only with `?fresh` |
 
 ## Record a clip
 
@@ -86,10 +95,11 @@ For TikTok, Shorts and Reels, make the window tall and narrow (9:16). The shelf 
 
 | Folder | Contents |
 |---|---|
-| `src/sim/` | The rules: sorting, coins, upgrades, rare marbles, orders, rush, the sorting chain, lucky marbles, marble ranks and sets, new workshops, unlocks, stamps, the next goal, saving and time away. Deterministic, no rendering code, covered by tests |
+| `src/sim/` | The rules: sorting, coins, upgrades, rare marbles, orders, rush, the sorting chain, lucky marbles, marble ranks and sets, new workshops, unlocks, stamps, the calendar (days played, the order of the day, the marble of the week, looks), the next goal, saving and time away. The rules have no clock: the game tells them what day it is. Deterministic, no rendering code, covered by tests |
 | `src/content/` | Colours, item families, rare marbles and their sets, upgrades, unlocks and the line's settings |
 | `src/view/` | three.js scene, light through the day, glow and depth blur, placeholder models and marble patterns built in code, motion and synthesized sound |
-| `src/ui/` | The overlay: coins, orders, next goal, rush meter, chain, upgrades, new workshop and unlocks, collection, records and stamps |
+| `src/ui/` | The overlay: coins, orders, the order of the day, next goal, rush meter, chain, upgrades, new workshop and unlocks, collection, day card, records and stamps, and the welcome-back card |
+| `tools/` | The build step that lets the game be installed as an app: it draws the icon in code and writes the manifest and the worker that keeps the files for use with no network |
 | `tests/` | Rule, layout and view tests |
 | `spike/` | The throwaway technical spike and its results (`spike/RESULTS.md`). Not part of the game |
 | `docs/superpowers/plans/` | The build plan for this milestone |
@@ -99,6 +109,8 @@ For TikTok, Shorts and Reels, make the window tall and narrow (9:16). The shelf 
 A new player's first minutes are tuned so that something good comes early: orders are short until three have been claimed, the first lucky marble comes after ninety seconds, and a line with room for a rare marble never waits longer than three times the usual wait for one. In a simulated two hours, a player who caught every lucky marble earned about 40% more than one who caught none.
 
 The star totals for the unlocks were set against a simulated player who plays half an hour a day, sorts one item every two seconds, catches every lucky marble and opens a new workshop when it adds half again to the stars. That player earned the eight unlocks on days 1, 2, 3, 5, 7, 9, 11 and 13. One who played an hour a day had them all by day 9; one who played fifteen minutes and rarely clicked had four after two weeks.
+
+The calendar was checked with simulated players over 14 days. The half-hour player finished the order of the day every day; it made up about 4% of all the coins earned, and the unlocks came on days 1, 2, 3, 5, 7, 8, 11 and 13, within a day of where they were without it. A player with fifteen minutes a day who sorts one item every ten seconds finished 13 orders of the day in the 14 days, about 5% of the coins earned.
 
 Prices were set against a simulated player over eight hours, not against real players. In that run a player who only claims orders buys something about every thirty seconds, finishes an order every one to three minutes, and opens the first new workshop after about eighty minutes; one who also clicks once a second gets there in about fifty. Later workshops take thirty-five to sixty minutes each. Real players will play differently, so treat these as a second pass.
 

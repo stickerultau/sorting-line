@@ -27,8 +27,11 @@ const DRY_FROM = 2
 const DRY_TO = 3
 /** A new player's first orders are short, so the first reward comes early. */
 const STARTER_ORDERS = 3
-/** What the order of the day can ask for. The kind turns with the day. */
-const DAILY_KINDS: OrderKind[] = ['jars', 'hand', 'colour', 'beads']
+/**
+ * What the order of the day can ask for. The kind turns with the day. Each is work the line does by itself:
+ * the order never runs out, so one that needed the player's hand could block every later one for a player who only watches.
+ */
+const DAILY_KINDS: OrderKind[] = ['jars', 'colour', 'beads']
 /** More marbles than this are never caught in one stretch of time away. */
 const MAX_AWAY_CATCHES = 2_000
 
@@ -263,10 +266,9 @@ function newOrder(state: SimState, others: Order[]): Order {
 /** Full jars this line fills in a minute when nothing holds it up. */
 const jarsAMinute = (state: SimState) => 60 / feedInterval(state) / state.config.jarCapacity
 
-/** An order of one kind, sized to this many minutes of the line's work. `pickColour` chooses among that many stations. */
-function sizedOrder(state: SimState, kind: OrderKind, minutes: number, pickColour: (colours: number) => number): Order {
+/** An order of one kind, sized to this many minutes of a line that fills this many jars a minute. `pickColour` chooses among that many stations. */
+function sizedOrder(state: SimState, kind: OrderKind, minutes: number, pickColour: (colours: number) => number, jarsPerMinute = jarsAMinute(state)): Order {
   const { config } = state
-  const jarsPerMinute = jarsAMinute(state)
   if (kind === 'jars') {
     const need = Math.max(5, Math.round((jarsPerMinute * minutes) / 5) * 5)
     return { kind, need, have: 0, worth: need * 0.5 }
@@ -316,12 +318,18 @@ export function claimOrder(state: SimState, slot: number): number | null {
 
 // The calendar: days played, the order of the day and the look.
 
-/** The order for a day: a long one, of a kind and colour that turn with the day. Every kind pays the same. */
-function dayOrder(state: SimState, day: number): Order {
+/**
+ * Deals the order for a day: a long one, of a kind and colour that turn with the day. Every kind pays the same.
+ * It is sized for the line as it stands before any upgrade is bought: it lasts through new workshops,
+ * and must not be a different job in each one.
+ */
+function dealDaily(state: SimState, day: number): void {
   const { config } = state
   const kinds = DAILY_KINDS.filter((kind) => kind !== 'beads' || config.families.includes('bead'))
-  const order = sizedOrder(state, kinds[day % kinds.length], config.dailyMinutes, (colours) => day % colours)
-  return { ...order, worth: jarsAMinute(state) * config.dailyMinutes * 0.5 * config.dailyPay }
+  const jarsPerMinute = jarsAMinute(state) * 0.9 ** state.upgrades.feeder
+  const order = sizedOrder(state, kinds[day % kinds.length], config.dailyMinutes, (colours) => day % colours, jarsPerMinute)
+  state.daily = { ...order, worth: jarsPerMinute * config.dailyMinutes * 0.5 * config.dailyPay }
+  state.dailyDay = day
 }
 
 /**
@@ -336,18 +344,22 @@ export function startDay(state: SimState, day: number): boolean {
   state.day = day
   if (!later) return false
   state.days++
-  if (!state.daily && day !== state.dailyDay) state.daily = dayOrder(state, day)
+  if (!state.daily && day !== state.dailyDay) dealDaily(state, day)
   return true
 }
 
-/** Pays the order of the day once it is finished. The next one comes with the next day. Returns the coins paid, or null if it is not finished. */
+/**
+ * Pays the order of the day once it is finished. Returns the coins paid, or null if it is not finished.
+ * Each calendar day brings one order at most. If the one claimed was left from an earlier day,
+ * today's comes at once; otherwise the next one comes with the next day.
+ */
 export function claimDaily(state: SimState): number | null {
   const daily = state.daily
   if (!daily || daily.have < daily.need) return null
   const coins = pay(state, orderReward(state, daily))
   state.dailyDone++
-  state.dailyDay = state.day
   state.daily = null
+  if (state.day !== state.dailyDay) dealDaily(state, state.day)
   return coins
 }
 
@@ -606,8 +618,12 @@ function newKind(state: SimState): ItemKind {
 function pickRare(state: SimState, random: number): RareId {
   const open = availableRares(state)
   const weekly = weeklyRare(state)
-  const weight = (rare: (typeof open)[number]) => TIER_WEIGHT[rare.tier] * (rare === weekly ? state.config.weekBoost : 1)
-  let roll = random * open.reduce((sum, rare) => sum + weight(rare), 0)
+  const usual = open.reduce((sum, rare) => sum + TIER_WEIGHT[rare.tier], 0)
+  // The marble of the week is weighted so that its chance is the usual one times the boost, not a little less.
+  const own = weekly ? TIER_WEIGHT[weekly.tier] : 0
+  const boosted = (state.config.weekBoost * own * (usual - own)) / Math.max(usual - state.config.weekBoost * own, 1e-9)
+  const weight = (rare: (typeof open)[number]) => (rare === weekly ? boosted : TIER_WEIGHT[rare.tier])
+  let roll = random * (usual - own + (weekly ? boosted : 0))
   for (const rare of open) {
     roll -= weight(rare)
     if (roll < 0) return rare.id

@@ -121,9 +121,14 @@ export function manifest() {
 export function workerSource(files: string[], version: string): string {
   return `const CACHE = 'sorting-line-${version}'
 const FILES = ${JSON.stringify(files)}
+// The kept files are the same for every request. Without this, a host that answers "Vary: Origin"
+// makes the page's own script and style miss their kept copies, and the game opens blank with no network.
+const KEPT = { cacheName: CACHE, ignoreVary: true }
 
 self.addEventListener('install', (event) => {
-  event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(FILES)).then(() => self.skipWaiting()))
+  // Each file is fetched afresh: a copy of the page the browser kept from before this build names files that are gone.
+  const fresh = FILES.map((file) => new Request(file, { cache: 'reload' }))
+  event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(fresh)).then(() => self.skipWaiting()))
 })
 
 self.addEventListener('activate', (event) => {
@@ -138,10 +143,10 @@ self.addEventListener('fetch', (event) => {
   const request = event.request
   if (request.method !== 'GET' || new URL(request.url).origin !== self.location.origin) return
   if (request.mode === 'navigate') {
-    event.respondWith(fetch(request).catch(() => caches.match('./', { cacheName: CACHE }).then((page) => page || Response.error())))
+    event.respondWith(fetch(request).catch(() => caches.match('./', KEPT).then((page) => page || Response.error())))
     return
   }
-  event.respondWith(caches.match(request, { cacheName: CACHE }).then((kept) => kept || fetch(request)))
+  event.respondWith(caches.match(request, KEPT).then((kept) => kept || fetch(request)))
 })
 `
 }

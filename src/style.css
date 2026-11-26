@@ -637,7 +637,8 @@ button:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
 }
 
 .report h2 { margin: 0 0 6px; font-size: 20px; }
-.report .numbers { margin-bottom: 14px; }
+.report .numbers { margin-bottom: 12px; }
+.report .panel-note.bonus { margin-bottom: 12px; }
 .report .prestige { margin-bottom: 0; }
 
 @keyframes report-in {

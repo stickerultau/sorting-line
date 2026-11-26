@@ -101,7 +101,7 @@ export interface SimState {
   days: number
   /** The order of the day. It never runs out. Null before the first day and once it has been claimed. */
   daily: Order | null
-  /** The day the last order of the day was claimed. The next one comes with the first day after it. */
+  /** The day the last order of the day was dealt. Each calendar day brings one at most. */
   dailyDay: number
   /** Orders of the day ever claimed. */
   dailyDone: number

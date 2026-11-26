@@ -17,8 +17,11 @@ export interface Hud {
   update(state: SimState, dt: number): void
   /** A number that floats up from a point on the screen and fades. */
   pop(x: number, y: number, text: string, tone: PopTone): void
-  /** A short notice at the top. `kind` adds a picture of that marble; 'lucky' gives it a gold edge. */
-  toast(title: string, body: string, kind?: RareKind, tone?: 'lucky'): void
+  /**
+   * A short notice at the top. `kind` adds a picture of that marble; 'lucky' gives it a gold edge.
+   * A notice that `waits` is held back while the welcome-back card is up, and shown once it is tapped.
+   */
+  toast(title: string, body: string, kind?: RareKind, tone?: 'lucky', waits?: boolean): void
   /** A short flash of light over the whole screen, for the rarest moments. */
   flash(): void
   /** Forgets recent earnings, so a lump sum such as pay for time away does not show as coins a minute. */
@@ -198,6 +201,7 @@ export function createHud(root: HTMLElement, actions: HudActions, labels: HudLab
       <h2 id="hud-report-title">Welcome back</h2>
       <p class="panel-note" id="hud-report-away"></p>
       <dl class="numbers" id="hud-report-rows"></dl>
+      <p class="panel-note bonus" id="hud-report-orders" hidden></p>
       <button type="button" class="prestige" id="hud-report-go"></button>
     </div>
     <div class="toasts" id="hud-toasts" role="status"></div>
@@ -342,8 +346,9 @@ export function createHud(root: HTMLElement, actions: HudActions, labels: HudLab
   const reportRows = find('hud-report-rows')
   const reportGo = find<HTMLButtonElement>('hud-report-go')
   let reported: Away | null = null
-  /** Notices that came while the card was up. They would sit behind it, so they wait until it is tapped. */
+  /** Notices worth keeping that came while the card was up. They would sit behind it, so they wait until it is tapped. */
   let held: (() => void)[] = []
+  let cardOrders = -1
   const closeReport = () => {
     reportCard.hidden = true
     reported = null
@@ -355,6 +360,15 @@ export function createHud(root: HTMLElement, actions: HudActions, labels: HudLab
     closeReport()
     if (paid > 0) pop(box.left + box.width / 2, box.top, `+${compact(paid)}`, 'rare')
   })
+  /** The line about finished orders, and the word on the button. Orders finish and are claimed behind the card, so this is kept up to date. */
+  const reportOrders = find('hud-report-orders')
+  const showCardOrders = (ready: number) => {
+    if (ready === cardOrders) return
+    cardOrders = ready
+    reportOrders.hidden = ready === 0
+    reportOrders.textContent = `${ready} ${plural(ready, 'order is', 'orders are')} finished. One tap claims ${plural(ready, 'it', 'them')}.`
+    reportGo.textContent = ready > 0 ? 'Collect' : 'Carry on'
+  }
   const report = (paid: Away) => {
     const sum: Away = reported
       ? {
@@ -379,7 +393,6 @@ export function createHud(root: HTMLElement, actions: HudActions, labels: HudLab
       const fresh = sum.found.length > 0 ? ` · ${sum.found.length} new ${plural(sum.found.length, 'kind', 'kinds')}` : ''
       rows.push(['Marbles the spotter arm caught', `${compact(sum.marbles)}${fresh}`])
     }
-    if (sum.orders > 0) rows.push(['Orders ready to claim', String(sum.orders)])
     reportRows.replaceChildren(
       ...rows.flatMap(([label, value]) => {
         const term = document.createElement('dt')
@@ -389,7 +402,7 @@ export function createHud(root: HTMLElement, actions: HudActions, labels: HudLab
         return [term, figure]
       }),
     )
-    reportGo.textContent = sum.orders > 0 ? 'Collect' : 'Carry on'
+    showCardOrders(sum.orders)
     reportCard.hidden = false
   }
 
@@ -717,6 +730,10 @@ export function createHud(root: HTMLElement, actions: HudActions, labels: HudLab
         orderCards.push(orderCard(orderList, () => actions.claim(slot)))
       }
       state.orders.forEach((order, slot) => showOrder(orderCards[slot], order, state))
+      if (reported) {
+        const done = (order: Order | null) => order !== null && order.have >= order.need
+        showCardOrders(state.orders.filter(done).length + (done(state.daily) ? 1 : 0))
+      }
       // The order of the day, or a word that today's is done.
       const daily = state.daily
       const dailyState = daily ? 'open' : state.day > 0 && state.dailyDay === state.day ? 'done' : 'none'
@@ -811,8 +828,8 @@ export function createHud(root: HTMLElement, actions: HudActions, labels: HudLab
       flash.animate([{ opacity: 0.55 }, { opacity: 0 }], { duration: 650, easing: 'ease-out' })
     },
 
-    toast(title, body, kind, tone) {
-      if (!reportCard.hidden) {
+    toast(title, body, kind, tone, waits) {
+      if (waits && !reportCard.hidden) {
         held = [...held.slice(-2), () => this.toast(title, body, kind, tone)]
         return
       }

@@ -145,7 +145,9 @@ const hud = createHud(
       if (coins === null) return null
       audio.unlock()
       audio.star()
-      hud.toast('Order of the day done', `+${compact(coins)} coins. The next one comes tomorrow.`, undefined, 'lucky')
+      // One left from an earlier day makes room for today's at once.
+      const next = state.daily ? 'Today’s order is on the board.' : 'The next one comes tomorrow.'
+      hud.toast('Order of the day done', `+${compact(coins)} coins. ${next}`, undefined, 'lucky')
       save()
       return coins
     },
@@ -249,10 +251,11 @@ function checkDay(): void {
     look ? `A new look is open: ${look.name}. Choose it under Records` : state.daily ? 'Your order of the day is on the board' : 'Welcome back',
     undefined,
     'lucky',
+    true,
   )
   const weekly = weeklyRare(state)
   if (weekly && (!started || weekOf(state.day) !== week)) {
-    hud.toast('Marble of the week', `${weekly.name} turns up ${state.config.weekBoost} times as often until Monday`, weekly)
+    hud.toast('Marble of the week', `${weekly.name} turns up ${state.config.weekBoost} times as often until Monday`, weekly, undefined, true)
   }
 }
 
@@ -283,9 +286,9 @@ function apply(events: SimEvent[]): void {
     audio.order()
     const share = Math.round(state.config.stampBonus * 100)
     if (stamps.length === 1) {
-      hud.toast('Stamp earned', `${STAMPS.find((stamp) => stamp.id === stamps[0])?.name} · +${share}% coins for good`, undefined, 'lucky')
+      hud.toast('Stamp earned', `${STAMPS.find((stamp) => stamp.id === stamps[0])?.name} · +${share}% coins for good`, undefined, 'lucky', true)
     } else {
-      hud.toast(`${stamps.length} stamps earned`, `+${stamps.length * share}% coins for good. See them under Records`, undefined, 'lucky')
+      hud.toast(`${stamps.length} stamps earned`, `+${stamps.length * share}% coins for good. See them under Records`, undefined, 'lucky', true)
     }
   }
   for (const event of events) {
@@ -333,8 +336,8 @@ function announceUnlocks(): void {
   const fresh = UNLOCKS.filter((unlock, index) => index >= state.unlocksSeen && state.stars >= unlock.stars)
   if (fresh.length === 0) return
   state.unlocksSeen += fresh.length
-  if (fresh.length === 1) hud.toast(`Unlocked: ${fresh[0].name}`, fresh[0].blurb, undefined, 'lucky')
-  else hud.toast(`${fresh.length} unlocks`, `${fresh.map((unlock) => unlock.name).join(', ')}. See them under Upgrades`, undefined, 'lucky')
+  if (fresh.length === 1) hud.toast(`Unlocked: ${fresh[0].name}`, fresh[0].blurb, undefined, 'lucky', true)
+  else hud.toast(`${fresh.length} unlocks`, `${fresh.map((unlock) => unlock.name).join(', ')}. See them under Upgrades`, undefined, 'lucky', true)
 }
 announceUnlocks()
 
