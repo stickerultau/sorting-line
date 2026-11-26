@@ -22,6 +22,8 @@ export interface Stage {
   orientation(): Orientation
   /** Moves the light to an hour of the day (0 to 24). It glides there unless `instant` is set. */
   setHour(hour: number, instant?: boolean): void
+  /** The colour of the lamp over the line. */
+  setLampColour(hex: number): void
   /** 'low' drops the depth blur and the lamp's shadows, smooths edges less and ignores the extra pixels of sharp screens. */
   setQuality(quality: Quality): void
   quality(): Quality
@@ -206,6 +208,9 @@ export function createStage(canvas: HTMLCanvasElement, startQuality: Quality = '
       if (!instant) return
       hour = wantedHour
       applyLight()
+    },
+    setLampColour(hex) {
+      lamp.color.setHex(hex)
     },
     setQuality(next) {
       quality = next

@@ -1,8 +1,9 @@
 import * as THREE from 'three'
 import './style.css'
-import { DEFAULT_CONFIG, MASTERY_BONUS, MASTERY_NAME, RARES, TIER_NAME, UNLOCKS, UPGRADES } from './content/content'
+import { DEFAULT_CONFIG, LOOKS, MASTERY_BONUS, MASTERY_NAME, RARES, TIER_NAME, UNLOCKS, UPGRADES } from './content/content'
+import { dayOf, weekOf, weeklyRare } from './sim/days'
 import { parseSave, payAway, resume, toSave, type Away, type SaveData } from './sim/save'
-import { MAX_DT, buy, catchLucky, claimOrder, flick, masteryRank, prestige, tick } from './sim/sim'
+import { MAX_DT, buy, catchLucky, claimDaily, claimOrder, flick, masteryRank, prestige, setLook, startDay, tick } from './sim/sim'
 import { STAMPS } from './sim/stamps'
 import { warmUp } from './sim/warmup'
 import type { SimEvent } from './sim/types'
@@ -18,6 +19,10 @@ const SAVE_KEY = 'sorting-line-save-v1'
 const SAVE_EVERY_MS = 10_000
 /** With no frame drawn for this long the line is standing still, in a background tab or a sleeping computer. */
 const STALLED_MS = 3_000
+/** Away for at least this long, the player comes back to a card instead of a passing notice. */
+const REPORT_SECONDS = 600
+/** How often the game looks at the calendar, to notice midnight. */
+const CALENDAR_EVERY_MS = 30_000
 /** A legendary marble caught by hand slows the line for a moment: this long, at this share of full speed. */
 const SLOW_SECONDS = 0.55
 const SLOW_RATE = 0.3
@@ -135,6 +140,30 @@ const hud = createHud(
       save()
       return coins
     },
+    claimDaily() {
+      const coins = claimDaily(state)
+      if (coins === null) return null
+      audio.unlock()
+      audio.star()
+      hud.toast('Order of the day done', `+${compact(coins)} coins. The next one comes tomorrow.`, undefined, 'lucky')
+      save()
+      return coins
+    },
+    collect() {
+      let coins = 0
+      state.orders.forEach((_, slot) => (coins += claimOrder(state, slot) ?? 0))
+      coins += claimDaily(state) ?? 0
+      audio.unlock()
+      if (coins > 0) audio.buy()
+      save()
+      return coins
+    },
+    chooseLook(id) {
+      if (!setLook(state, id)) return false
+      applyLook()
+      save()
+      return true
+    },
     prestige() {
       const config = state.config
       const stars = prestige(state)
@@ -151,6 +180,7 @@ const hud = createHud(
         line.set.dispose()
         stage.scene.remove(line.root)
         line = buildLine()
+        applyLook()
       }
       save()
       return stars
@@ -192,6 +222,39 @@ function buildLine() {
   return { root, set, view }
 }
 let line = buildLine()
+
+/** Paints the workshop in the look the player has chosen. */
+function applyLook(): void {
+  const look = LOOKS.find((candidate) => candidate.id === state.look) ?? LOOKS[0]
+  line.set.setLook(look)
+  stage.setLampColour(look.lamp)
+}
+applyLook()
+
+// The calendar. The rules have no clock: this tells them the day, at the start and whenever midnight passes.
+/** `?seed` lines are the same every time, so they keep no calendar. `?fresh&day=3` looks three days ahead, for checks. */
+const calendar = !params.has('seed')
+const dayShift = fresh ? Number(params.get('day')) || 0 : 0
+function checkDay(): void {
+  if (!calendar) return
+  const week = weekOf(state.day)
+  const started = state.day > 0
+  if (!startDay(state, dayOf(Date.now(), new Date().getTimezoneOffset()) + dayShift)) return
+  save()
+  // A new player has enough to read already.
+  if (state.days === 1 && state.earned === 0) return
+  const look = LOOKS.find((candidate) => candidate.days === state.days)
+  hud.toast(
+    `Day ${compact(state.days)} on your day card`,
+    look ? `A new look is open: ${look.name}. Choose it under Records` : state.daily ? 'Your order of the day is on the board' : 'Welcome back',
+    undefined,
+    'lucky',
+  )
+  const weekly = weeklyRare(state)
+  if (weekly && (!started || weekOf(state.day) !== week)) {
+    hud.toast('Marble of the week', `${weekly.name} turns up ${state.config.weekBoost} times as often until Monday`, weekly)
+  }
+}
 
 // Run the line for a few seconds before the first frame, so the page opens on a working line.
 line.view.silent = true
@@ -276,13 +339,13 @@ function announceUnlocks(): void {
 announceUnlocks()
 
 function welcomeBack(paid: Away): void {
-  const hours = Math.floor(paid.seconds / 3600)
-  const minutes = Math.floor((paid.seconds % 3600) / 60)
-  const gone = hours > 0 ? `${hours} h ${minutes} min` : `${minutes} min`
-  hud.toast('Welcome back', `Away ${gone} · ${compact(paid.jars)} jars · +${compact(paid.coins)} coins`)
   hud.settle()
+  // A long time away gets a card that waits for a tap; a short one a notice that passes.
+  if (paid.seconds >= REPORT_SECONDS) return hud.report(paid)
+  hud.toast('Welcome back', `Away ${Math.floor(paid.seconds / 60)} min · ${compact(paid.jars)} jars · +${compact(paid.coins)} coins`)
 }
 if (away) welcomeBack(away)
+checkDay()
 
 // Two tabs saving in turn would overwrite each other. The tab that sees another one save stops saving.
 const warnOtherTab = () => hud.toast('Open in another tab', 'This tab has stopped saving. Progress is kept in the other one.')
@@ -334,6 +397,7 @@ document.addEventListener('visibilitychange', () => {
 window.addEventListener('pagehide', save)
 
 let last = performance.now()
+let dayCheckedAt = Date.now()
 function frame(now: number): void {
   requestAnimationFrame(frame)
   const dt = Math.min((now - last) / 1000, MAX_DT)
@@ -346,6 +410,11 @@ function frame(now: number): void {
     line.view.restock(state.shelved)
     welcomeBack(paid)
     save()
+  }
+  // The calendar is read after any time away is paid, so a new day's order starts from nothing.
+  if (wall - dayCheckedAt >= CALENDAR_EVERY_MS) {
+    dayCheckedAt = wall
+    checkDay()
   }
   quiet -= dt
   if (dt > 0) {
@@ -361,3 +430,11 @@ function frame(now: number): void {
   line.set.setLamp(Math.max(stage.render(dt).lamp, state.rushLeft > 0 || state.frenzyLeft > 0 ? 1 : 0))
 }
 requestAnimationFrame(frame)
+
+// Installed as an app, the game opens with no network. Only a build makes the worker that keeps its files.
+if (import.meta.env.PROD && 'serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(() => {})
+// Browsers that can install the game say so; the button then asks them to.
+window.addEventListener('beforeinstallprompt', (event) => {
+  event.preventDefault()
+  hud.offerInstall(() => void (event as Event & { prompt(): Promise<unknown> }).prompt())
+})

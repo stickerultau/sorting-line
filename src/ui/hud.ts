@@ -1,5 +1,7 @@
-import { COLOUR_HEX, MASTERY_AT, MASTERY_NAME, RARES, SETS, TIER_NAME, UNLOCKS, UPGRADES, type RareKind, type UpgradeId } from '../content/content'
+import { COLOUR_HEX, LOOKS, MASTERY_AT, MASTERY_NAME, RARES, SETS, TIER_NAME, UNLOCKS, UPGRADES, type LookId, type RareKind, type UpgradeId } from '../content/content'
+import { weeklyRare } from '../sim/days'
 import { nextGoal, type Goal } from '../sim/goal'
+import type { Away } from '../sim/save'
 import { chainTip, collectionBonus, masteryRank, nextStarAt, orderReward, rushSeconds, starsWaiting, steadyIncome, upgradeCost } from '../sim/sim'
 import { STAMPS } from '../sim/stamps'
 import type { Order, SimState } from '../sim/types'
@@ -21,6 +23,10 @@ export interface Hud {
   flash(): void
   /** Forgets recent earnings, so a lump sum such as pay for time away does not show as coins a minute. */
   settle(): void
+  /** The card that greets a player after a long time away. It stays until they tap it. */
+  report(paid: Away): void
+  /** Shows a button that installs the game as an app. */
+  offerInstall(install: () => void): void
 }
 
 export interface HudActions {
@@ -33,6 +39,12 @@ export interface HudActions {
   buy(id: UpgradeId): boolean
   /** Claims a finished order. Returns the coins paid, or null if it was not finished. */
   claim(slot: number): number | null
+  /** Claims the order of the day. Returns the coins paid, or null if it was not finished. */
+  claimDaily(): number | null
+  /** Claims every finished order at once. Returns the coins paid. */
+  collect(): number
+  /** Chooses a look for the workshop. Returns whether the days played have opened it. */
+  chooseLook(id: LookId): boolean
   /** Opens a new workshop. Returns the stars gained, 0 if none was waiting. */
   prestige(): number
   /** Erases all progress and starts again. */
@@ -57,6 +69,15 @@ const SHOW_CHAIN_FROM = 3
 /** Coins in flight to the wallet at once. */
 const MAX_FLYING = 14
 const percent = (share: number) => `+${Math.round(share * 100)}%`
+const css = (hex: number) => `#${hex.toString(16).padStart(6, '0')}`
+const plural = (count: number, one: string, many: string) => (count === 1 ? one : many)
+
+/** A stretch of time in hours and minutes. */
+function span(seconds: number): string {
+  const hours = Math.floor(seconds / 3600)
+  const minutes = Math.floor((seconds % 3600) / 60)
+  return hours > 0 ? `${hours} h ${minutes} min` : `${minutes} min`
+}
 const capital = (word: string) => word[0].toUpperCase() + word.slice(1)
 
 /** What an order asks for, in full and in a word for narrow screens. */
@@ -82,6 +103,8 @@ const NUMBERS: [string, (state: SimState) => number][] = [
   ['Rushes', (s) => s.rushes],
   ['New workshops', (s) => s.workshops],
   ['Stars', (s) => s.stars],
+  ['Days played', (s) => s.days],
+  ['Orders of the day finished', (s) => s.dailyDone],
 ]
 
 /** A wait in words. It is an estimate, so it is rounded the way a person would say it. */
@@ -124,11 +147,14 @@ export function createHud(root: HTMLElement, actions: HudActions, labels: HudLab
         <button type="button" class="tool" id="hud-view">Change view</button>
         <button type="button" class="tool" id="hud-quality">${labels.quality}</button>
         <button type="button" class="tool" id="hud-sound">${labels.sound}</button>
+        <button type="button" class="tool" id="hud-install" hidden>Install app</button>
       </nav>
     </header>
     <section class="orders" aria-label="Orders">
       <h2>Orders <span id="hud-orders-done"></span></h2>
       <div class="order-list" id="hud-order-list"></div>
+      <div id="hud-daily-slot"></div>
+      <p class="daily-done" id="hud-daily-done" hidden>Order of the day done. The next one comes tomorrow.</p>
       <div class="goal-row">
         <p class="goal" id="hud-goal" hidden><b>Next</b><span></span></p>
         <p class="frenzy-chip" id="hud-frenzy" hidden></p>
@@ -154,15 +180,26 @@ export function createHud(root: HTMLElement, actions: HudActions, labels: HudLab
       <h2>Marble collection</h2>
       <p class="panel-note">Rare marbles glow on the belt. Click one to catch it for double coins. Catching more of a marble raises its rank, and every rank adds coins for good.</p>
       <p class="panel-note bonus" id="hud-bonus"></p>
+      <p class="panel-note week" id="hud-week" hidden></p>
       <div class="marble-grid" id="hud-marble-grid"></div>
     </aside>
     <aside class="panel" id="hud-records" hidden>
+      <h2>Day card</h2>
+      <p class="panel-note bonus" id="hud-days"></p>
+      <div class="looks" id="hud-looks"></div>
+      <p class="panel-note fine day-note">A new look for the workshop opens at 3, 7, 14 and 30 days played. A missed day costs nothing.</p>
       <h2>Records</h2>
       <dl class="numbers" id="hud-numbers"></dl>
       <h2>Stamps</h2>
       <p class="panel-note bonus" id="hud-stamp-bonus"></p>
       <div class="stamp-grid" id="hud-stamp-grid"></div>
     </aside>
+    <div class="report" id="hud-report" role="dialog" aria-labelledby="hud-report-title" hidden>
+      <h2 id="hud-report-title">Welcome back</h2>
+      <p class="panel-note" id="hud-report-away"></p>
+      <dl class="numbers" id="hud-report-rows"></dl>
+      <button type="button" class="prestige" id="hud-report-go"></button>
+    </div>
     <div class="toasts" id="hud-toasts" role="status"></div>
     <div class="pops" id="hud-pops" aria-hidden="true"></div>
     <div class="pops" id="hud-flights" aria-hidden="true"></div>
@@ -299,9 +336,70 @@ export function createHud(root: HTMLElement, actions: HudActions, labels: HudLab
     prestigeShown = ''
   }, () => (prestigeShown = ''))
 
+  // The welcome-back card. If the player goes away again before tapping it, the new numbers are added to it.
+  const reportCard = find('hud-report')
+  const reportAway = find('hud-report-away')
+  const reportRows = find('hud-report-rows')
+  const reportGo = find<HTMLButtonElement>('hud-report-go')
+  let reported: Away | null = null
+  /** Notices that came while the card was up. They would sit behind it, so they wait until it is tapped. */
+  let held: (() => void)[] = []
+  const closeReport = () => {
+    reportCard.hidden = true
+    reported = null
+    for (const show of held.splice(0)) show()
+  }
+  reportGo.addEventListener('click', () => {
+    const box = reportGo.getBoundingClientRect()
+    const paid = actions.collect()
+    closeReport()
+    if (paid > 0) pop(box.left + box.width / 2, box.top, `+${compact(paid)}`, 'rare')
+  })
+  const report = (paid: Away) => {
+    const sum: Away = reported
+      ? {
+          seconds: reported.seconds + paid.seconds,
+          counted: reported.counted + paid.counted,
+          jars: reported.jars + paid.jars,
+          coins: reported.coins + paid.coins,
+          marbles: reported.marbles + paid.marbles,
+          found: [...new Set([...reported.found, ...paid.found])],
+          orders: paid.orders,
+        }
+      : paid
+    reported = sum
+    reportAway.textContent = sum.counted < sum.seconds
+      ? `You were away ${span(sum.seconds)}. The line ran for the first ${span(sum.counted)}.`
+      : `You were away ${span(sum.seconds)}, and the line kept running.`
+    const rows: [string, string][] = [
+      ['Jars shelved', compact(sum.jars)],
+      ['Coins earned', `+${compact(sum.coins)}`],
+    ]
+    if (sum.marbles > 0) {
+      const fresh = sum.found.length > 0 ? ` · ${sum.found.length} new ${plural(sum.found.length, 'kind', 'kinds')}` : ''
+      rows.push(['Marbles the spotter arm caught', `${compact(sum.marbles)}${fresh}`])
+    }
+    if (sum.orders > 0) rows.push(['Orders ready to claim', String(sum.orders)])
+    reportRows.replaceChildren(
+      ...rows.flatMap(([label, value]) => {
+        const term = document.createElement('dt')
+        term.textContent = label
+        const figure = document.createElement('dd')
+        figure.textContent = value
+        return [term, figure]
+      }),
+    )
+    reportGo.textContent = sum.orders > 0 ? 'Collect' : 'Carry on'
+    reportCard.hidden = false
+  }
+
+  const installButton = find<HTMLButtonElement>('hud-install')
+
   window.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape') show(null)
-    else if (event.key.toLowerCase() === 'h' && !event.repeat && !event.ctrlKey && !event.metaKey && !event.altKey) root.hidden = !root.hidden
+    if (event.key === 'Escape') {
+      show(null)
+      closeReport()
+    } else if (event.key.toLowerCase() === 'h' && !event.repeat && !event.ctrlKey && !event.metaKey && !event.altKey) root.hidden = !root.hidden
   })
 
   // Upgrade cards, built once and then kept up to date.
@@ -325,32 +423,81 @@ export function createHud(root: HTMLElement, actions: HudActions, labels: HudLab
     return { upgrade, card, level: card.querySelector<HTMLElement>('.upgrade-level')!, cost: card.querySelector<HTMLElement>('.upgrade-cost')!, shown: '' }
   })
 
-  // Order cards, one for each place on the board.
-  const orderCards: { card: HTMLButtonElement; shown: string; parts: Record<'dot' | 'full' | 'short' | 'reward' | 'fill' | 'count', HTMLElement> }[] = []
-  const addOrderCard = (slot: number) => {
+  // Order cards: one for each place on the board, and one for the order of the day.
+  interface OrderCard {
+    card: HTMLButtonElement
+    /** Said before the order's own words, for a card that carries a tag. */
+    lead: string
+    shown: string
+    parts: Record<'dot' | 'full' | 'short' | 'reward' | 'fill' | 'count', HTMLElement>
+  }
+  const orderCard = (parent: HTMLElement, claim: () => number | null, tag = '', lead = ''): OrderCard => {
     const card = document.createElement('button')
     card.type = 'button'
     card.className = 'order'
     card.disabled = true
     card.innerHTML = `
-      <span class="order-name"><i class="order-dot" hidden></i><span class="order-full"></span><span class="order-short"></span></span>
+      <span class="order-name">${tag ? `<b class="order-tag">${tag}</b>` : ''}<i class="order-dot" hidden></i><span class="order-full"></span><span class="order-short"></span></span>
       <span class="order-reward"><span class="coin" aria-hidden="true"></span><b></b></span>
       <span class="order-track"><span class="order-fill"></span></span>
       <span class="order-count"></span>`
     card.addEventListener('click', () => {
-      const paid = actions.claim(slot)
+      const paid = claim()
       if (paid === null) return
       const box = card.getBoundingClientRect()
       pop(box.left + box.width / 2, box.top + box.height / 2, `+${compact(paid)}`, 'coin')
     })
-    orderList.append(card)
+    parent.append(card)
     const part = <T extends HTMLElement>(selector: string) => card.querySelector<T>(selector)!
-    orderCards.push({
+    return {
       card,
+      lead,
       shown: '',
       parts: { dot: part('.order-dot'), full: part('.order-full'), short: part('.order-short'), reward: part('.order-reward b'), fill: part('.order-fill'), count: part('.order-count') },
-    })
+    }
   }
+  const showOrder = (entry: OrderCard, order: Order, state: SimState) => {
+    const ready = order.have >= order.need
+    const reward = orderReward(state, order)
+    const signature = `${order.kind}|${order.colour}|${order.need}|${order.have}|${reward}`
+    if (signature === entry.shown) return
+    entry.shown = signature
+    const words = orderWords(order)
+    entry.parts.full.textContent = words.full
+    entry.parts.short.textContent = words.short
+    entry.parts.dot.hidden = order.kind !== 'colour'
+    if (order.colour) entry.parts.dot.style.background = css(COLOUR_HEX[order.colour])
+    entry.parts.reward.textContent = compact(reward)
+    entry.parts.fill.style.width = `${((order.have / order.need) * 100).toFixed(1)}%`
+    entry.parts.count.textContent = ready ? 'Claim' : `${compact(order.have)} / ${compact(order.need)}`
+    entry.card.disabled = !ready
+    entry.card.classList.toggle('ready', ready)
+    entry.card.setAttribute('aria-label', `${entry.lead}${words.full}. ${ready ? 'Finished. Claim' : `${order.have} of ${order.need}. Pays`} ${compact(reward)} coins`)
+  }
+  const orderCards: OrderCard[] = []
+  const dailyCard = orderCard(find('hud-daily-slot'), actions.claimDaily, 'Today', 'Order of the day: ')
+  dailyCard.card.classList.add('daily')
+  dailyCard.card.hidden = true
+  const dailyDone = find('hud-daily-done')
+  let dailyShown = ''
+
+  // The day card: days played, and the looks they have opened.
+  const daysNote = find('hud-days')
+  const lookList = find('hud-looks')
+  let daysShown = ''
+  const lookButtons = LOOKS.map((look) => {
+    const button = document.createElement('button')
+    button.type = 'button'
+    button.className = 'look'
+    button.innerHTML = `<i style="background:linear-gradient(135deg, ${css(look.wall)} 0 55%, ${css(look.belt)} 55% 80%, ${css(look.lamp)} 80%)"></i><b>${look.name}</b><span></span>`
+    button.addEventListener('click', () => {
+      if (actions.chooseLook(look.id)) daysShown = ''
+    })
+    lookList.append(button)
+    return { look, button, note: button.querySelector('span')! }
+  })
+  const weekNote = find('hud-week')
+  let weekShown = '-'
 
   // Collection cells, one per marble.
   // Unlocks: one line each, in the order they come.
@@ -464,11 +611,36 @@ export function createHud(root: HTMLElement, actions: HudActions, labels: HudLab
           goalLine.hidden = words === ''
         }
 
+        // The marble of the week, in the collection.
+        const weekly = weeklyRare(state)
+        const weekId = weekly?.id ?? ''
+        if (weekId !== weekShown) {
+          weekShown = weekId
+          weekNote.hidden = !weekly
+          if (weekly) weekNote.textContent = `Marble of the week: ${weekly.name}. It turns up ${state.config.weekBoost} times as often until Monday.`
+          for (const entry of cells) {
+            entry.cell.classList.toggle('weekly', entry.kind === weekly)
+            entry.cell.dataset.week = `×${state.config.weekBoost} this week`
+          }
+        }
       }
 
       // Records: the count on the button always, the rest only while the panel is open.
       if (state.stamps.length !== stampsShown) stampCount.textContent = `${(stampsShown = state.stamps.length)}/${STAMPS.length}`
       if (!panels[2].panel.hidden) {
+        const daySignature = `${state.days}|${state.dailyDone}|${state.look}`
+        if (daySignature !== daysShown) {
+          daysShown = daySignature
+          daysNote.textContent = `${compact(state.days)} ${plural(state.days, 'day', 'days')} played · ${compact(state.dailyDone)} ${plural(state.dailyDone, 'order', 'orders')} of the day finished`
+          for (const { look, button, note } of lookButtons) {
+            const open = state.days >= look.days
+            const chosen = state.look === look.id
+            button.disabled = !open
+            button.classList.toggle('on', chosen)
+            button.setAttribute('aria-pressed', String(chosen))
+            note.textContent = chosen ? 'Chosen' : open ? 'Choose' : `At ${look.days} days`
+          }
+        }
         for (const row of numberRows) {
           const value = compact(row.read(state))
           if (value !== row.shown) row.value.textContent = row.shown = value
@@ -540,26 +712,20 @@ export function createHud(root: HTMLElement, actions: HudActions, labels: HudLab
       }
 
       // Orders.
-      while (orderCards.length < state.orders.length) addOrderCard(orderCards.length)
-      state.orders.forEach((order, slot) => {
-        const entry = orderCards[slot]
-        const ready = order.have >= order.need
-        const reward = orderReward(state, order)
-        const signature = `${order.kind}|${order.colour}|${order.need}|${order.have}|${reward}`
-        if (signature === entry.shown) return
-        entry.shown = signature
-        const words = orderWords(order)
-        entry.parts.full.textContent = words.full
-        entry.parts.short.textContent = words.short
-        entry.parts.dot.hidden = order.kind !== 'colour'
-        if (order.colour) entry.parts.dot.style.background = `#${COLOUR_HEX[order.colour].toString(16).padStart(6, '0')}`
-        entry.parts.reward.textContent = compact(reward)
-        entry.parts.fill.style.width = `${((order.have / order.need) * 100).toFixed(1)}%`
-        entry.parts.count.textContent = ready ? 'Claim' : `${compact(order.have)} / ${compact(order.need)}`
-        entry.card.disabled = !ready
-        entry.card.classList.toggle('ready', ready)
-        entry.card.setAttribute('aria-label', `${words.full}. ${ready ? 'Finished. Claim' : `${order.have} of ${order.need}. Pays`} ${compact(reward)} coins`)
-      })
+      while (orderCards.length < state.orders.length) {
+        const slot = orderCards.length
+        orderCards.push(orderCard(orderList, () => actions.claim(slot)))
+      }
+      state.orders.forEach((order, slot) => showOrder(orderCards[slot], order, state))
+      // The order of the day, or a word that today's is done.
+      const daily = state.daily
+      const dailyState = daily ? 'open' : state.day > 0 && state.dailyDay === state.day ? 'done' : 'none'
+      if (dailyState !== dailyShown) {
+        dailyShown = dailyState
+        dailyCard.card.hidden = !daily
+        dailyDone.hidden = dailyState !== 'done'
+      }
+      if (daily) showOrder(dailyCard, daily, state)
       if (state.ordersDone !== doneShown) ordersDone.textContent = (doneShown = state.ordersDone) > 0 ? `${compact(doneShown)} done` : ''
 
       // Upgrades.
@@ -646,6 +812,10 @@ export function createHud(root: HTMLElement, actions: HudActions, labels: HudLab
     },
 
     toast(title, body, kind, tone) {
+      if (!reportCard.hidden) {
+        held = [...held.slice(-2), () => this.toast(title, body, kind, tone)]
+        return
+      }
       const toast = document.createElement('div')
       toast.className = kind ? `toast tier-${kind.tier}` : tone ? `toast toast-${tone}` : 'toast'
       const ball = kind ? `<span class="marble-ball" style="background-image:url(${paintMarble(kind, 128).toDataURL()})"></span>` : ''
@@ -661,6 +831,16 @@ export function createHud(root: HTMLElement, actions: HudActions, labels: HudLab
 
     settle() {
       samples = []
+    },
+
+    report,
+
+    offerInstall(install) {
+      installButton.hidden = false
+      installButton.onclick = () => {
+        installButton.hidden = true
+        install()
+      }
     },
   }
 }

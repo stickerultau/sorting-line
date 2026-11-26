@@ -36,6 +36,7 @@ function bareSet(config: SimConfig): LineSet {
     setShelf() {},
     setLed() {},
     setLamp() {},
+    setLook() {},
     dispose() {},
     chute: new THREE.Vector3(0, 0.95, 0),
     bin: new THREE.Vector3(config.beltLength + 1.15, -0.75, 0),

@@ -1,5 +1,5 @@
 import * as THREE from 'three'
-import { COLOUR_HEX, RARES, type ColourId, type FamilyId, type RareId, type SimConfig } from '../content/content'
+import { COLOUR_HEX, LOOKS, RARES, type ColourId, type FamilyId, type Look, type RareId, type SimConfig } from '../content/content'
 import { ITEM_RADIUS, JAR, SHELVES, type Orientation } from './layout'
 import { paintGlow, paintMarble, paintPlainMarble } from './marbleArt'
 
@@ -16,8 +16,6 @@ const BEAD = { ring: 0.125, tube: 0.075 }
 export const REST_Y: Record<FamilyId, number> = { marble: ITEM_RADIUS, button: 0.055, bead: BEAD.tube }
 
 const RIB_SPACING = 0.5
-const CREAM = 0xf4eee2
-const WALL = 0x7fa293
 const LED_READY = 0x35ff8a
 const LED_BUSY = 0xff9a2a
 
@@ -48,6 +46,8 @@ export interface LineSet {
   setLed(station: number, ready: boolean): void
   /** Lights the strip under the shelf. 0 is off, 1 is fully on. */
   setLamp(level: number): void
+  /** Paints the wall, the body of the machine, the belt and the lamp strip in a look's colours. */
+  setLook(look: Look): void
   /** Where new items appear. */
   chute: THREE.Vector3
   /** Where unsorted items land. */
@@ -85,15 +85,32 @@ function woodTexture(): THREE.CanvasTexture {
   })
 }
 
-function beltTexture(): THREE.CanvasTexture {
-  return canvasTexture(64, (g, size) => {
-    g.fillStyle = '#2c2f34'
-    g.fillRect(0, 0, size, size)
-    g.fillStyle = '#3b3f46'
-    g.fillRect(0, 0, 9, size)
-    g.fillStyle = '#1e2024'
-    g.fillRect(9, 0, 3, size)
-  })
+/** A colour made lighter or darker, as a CSS colour: `lift` moves it toward white, `scale` multiplies it. */
+function shade(hex: number, lift: number, scale: number): string {
+  const part = (shift: number) => {
+    const value = (hex >> shift) & 255
+    return Math.round(Math.min(255, (value + (255 - value) * lift) * scale))
+  }
+  return `rgb(${part(16)},${part(8)},${part(0)})`
+}
+
+/** The ribbed top of the belt. `paint` draws it again in another colour. */
+function beltTexture(): { map: THREE.CanvasTexture; paint(colour: number): void } {
+  let g!: CanvasRenderingContext2D
+  const size = 64
+  const map = canvasTexture(size, (context) => (g = context))
+  return {
+    map,
+    paint(colour) {
+      g.fillStyle = shade(colour, 0, 1)
+      g.fillRect(0, 0, size, size)
+      g.fillStyle = shade(colour, 0.07, 1)
+      g.fillRect(0, 0, 9, size)
+      g.fillStyle = shade(colour, 0, 0.68)
+      g.fillRect(9, 0, 3, size)
+      map.needsUpdate = true
+    },
+  }
 }
 
 /** A closed ring of straight edges. Drawn by hand so the rim and the holes can each have the detail they need. */
@@ -233,14 +250,16 @@ export function buildSet(models: Models, config: SimConfig): LineSet {
   const tableMap = woodTexture()
   tableMap.repeat.set(14, 5)
   const table = new THREE.MeshStandardMaterial({ map: tableMap, color: 0xb98a63, roughness: 0.7 })
-  const cream = new THREE.MeshPhysicalMaterial({ color: CREAM, roughness: 0.3, clearcoat: 1, clearcoatRoughness: 0.15 })
+  const cream = new THREE.MeshPhysicalMaterial({ color: LOOKS[0].body, roughness: 0.3, clearcoat: 1, clearcoatRoughness: 0.15 })
   const creamOpen = cream.clone()
   creamOpen.side = THREE.DoubleSide
   const steel = new THREE.MeshStandardMaterial({ color: 0xc9ced2, metalness: 0.9, roughness: 0.32 })
   const rubber = new THREE.MeshStandardMaterial({ color: 0x25272b, roughness: 0.9 })
   const brass = new THREE.MeshStandardMaterial({ color: 0xd9a441, metalness: 1, roughness: 0.24 })
-  const strip = new THREE.MeshStandardMaterial({ color: 0x2a2018, emissive: 0xffb062, emissiveIntensity: 0 })
-  const beltMap = beltTexture()
+  const strip = new THREE.MeshStandardMaterial({ color: 0x2a2018, emissive: LOOKS[0].lamp, emissiveIntensity: 0 })
+  const belt = beltTexture()
+  belt.paint(LOOKS[0].belt)
+  const beltMap = belt.map
   beltMap.repeat.set((length + 0.8) / RIB_SPACING, 1)
   const beltTop = new THREE.MeshStandardMaterial({ map: beltMap, roughness: 0.85 })
 
@@ -257,7 +276,8 @@ export function buildSet(models: Models, config: SimConfig): LineSet {
   // Room
   const pegboard = pegboardTexture()
   pegboard.repeat.set(140 / 0.6, 70 / 0.6)
-  const wall = add(new THREE.PlaneGeometry(140, 70), new THREE.MeshStandardMaterial({ color: WALL, map: pegboard, roughness: 0.95 }), 8, 14, -2.3)
+  const wallPaint = new THREE.MeshStandardMaterial({ color: LOOKS[0].wall, map: pegboard, roughness: 0.95 })
+  const wall = add(new THREE.PlaneGeometry(140, 70), wallPaint, 8, 14, -2.3)
   wall.castShadow = false
   const top = add(new THREE.PlaneGeometry(140, 44), table, 8, TABLE_Y, 19.6)
   top.rotation.x = -Math.PI / 2
@@ -341,6 +361,13 @@ export function buildSet(models: Models, config: SimConfig): LineSet {
     },
     setLamp(level) {
       strip.emissiveIntensity = 7 * level
+    },
+    setLook(look) {
+      wallPaint.color.setHex(look.wall)
+      cream.color.setHex(look.body)
+      creamOpen.color.setHex(look.body)
+      strip.emissive.setHex(look.lamp)
+      belt.paint(look.belt)
     },
     chute: new THREE.Vector3(0, 0.95, 0),
     bin: new THREE.Vector3(binX, -0.75, 0),
